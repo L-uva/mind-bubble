@@ -1,0 +1,24 @@
+{
+  "machine": { "number": 1001, "type": "TYPE-A" },
+  "project": {
+    "title": "Example project",
+    "description": "Example project with a few steps"
+  },
+  "steps": [
+    {
+      "step_number": 1,
+      "title": "Safety check",
+      "sub_steps": [
+        { "title": "Step A", "description": "First sub step", "status": "pending" },
+        { "title": "Step B", "description": "Second sub step", "status": "pending" }
+      ]
+    },
+    {
+      "step_number": 2,
+      "title": "Measurement",
+      "value": 0,
+      "unit": "V",
+      "status": "pending"
+    }
+  ]
+}

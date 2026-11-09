@@ -1,0 +1,127 @@
+<script setup>
+import { computed, ref } from 'vue'
+import { Check, X, Lock, Pencil, Save, Trash2 } from 'lucide-vue-next'
+import Card from './Card.vue'
+import Checklist from './Checklist.vue'
+import { HUES, count, pendingBelow, valueText } from '../tree.js'
+
+const props = defineProps({ node: Object, path: Array, hue: { type: Number, default: null } })
+const emit = defineEmits(['close', 'done', 'reopen', 'edit', 'remove', 'color'])
+
+const remaining = computed(() => pendingBelow(props.node))
+const subCount = computed(() => count(props.node.sub_steps).total)
+const confirming = ref(false)
+const completed = computed(() => props.node.status === 'completed')
+const value = computed(() => valueText(props.node))
+
+const editing = ref(false)
+const draft = ref({})
+const valid = computed(() => draft.value.title?.trim())
+
+function startEdit() {
+  draft.value = {
+    title: props.node.title,
+    description: props.node.description ?? '',
+    value: props.node.value ?? '',
+    unit: props.node.unit ?? ''
+  }
+  editing.value = true
+}
+
+function submit() {
+  if (!valid.value) return
+  const v = String(draft.value.value).trim()
+  emit('edit', {
+    title: draft.value.title.trim(),
+    description: draft.value.description.trim(),
+    value: v === '' ? undefined : isNaN(Number(v)) ? v : Number(v),
+    unit: draft.value.unit.trim() || undefined
+  })
+  editing.value = false
+}
+</script>
+
+<template>
+  <Card :title="node.title" :subtitle="path.join(' › ')" @close="emit('close')">
+    <template #tools>
+      <div v-if="!editing && !confirming" class="card-tools tools-row">
+        <button class="icon-btn" title="Redigera" @click="startEdit"><Pencil :size="16" /></button>
+        <button class="icon-btn danger" title="Ta bort" @click="confirming = true"><Trash2 :size="16" /></button>
+      </div>
+    </template>
+
+    <div v-if="confirming" class="confirm">
+      <Trash2 :size="28" />
+      <p>
+        Ta bort <strong>{{ node.title }}</strong
+        >?
+      </p>
+      <p v-if="subCount" class="warn">
+        {{ subCount }} delsteg under bubblan tas också bort permanent.
+      </p>
+      <p class="muted">Detta kan inte ångras.</p>
+    </div>
+    <form v-else-if="editing" id="node-edit" class="form" @submit.prevent="submit">
+      <label>Titel *<input v-model="draft.title" required autofocus /></label>
+      <label>Beskrivning<textarea v-model="draft.description" rows="3" /></label>
+      <div class="row">
+        <label>Värde<input v-model="draft.value" /></label>
+        <label>Enhet<input v-model="draft.unit" /></label>
+      </div>
+      <div v-if="hue !== null" class="colors">
+        <span class="muted">Färg (delsteg får samma färg)</span>
+        <div class="swatches">
+          <button
+            v-for="h in HUES"
+            :key="h"
+            type="button"
+            class="swatch"
+            :class="{ on: h === hue }"
+            :style="{ '--h': h }"
+            :title="`Färg ${h}`"
+            @click="emit('color', h)"
+          />
+        </div>
+        <input
+          class="hue-slider"
+          type="range"
+          min="0"
+          max="360"
+          :value="hue"
+          @input="emit('color', Number($event.target.value))"
+        />
+      </div>
+    </form>
+    <template v-else>
+      <p v-if="node.description" class="desc">{{ node.description }}</p>
+      <p v-else class="muted">Ingen beskrivning.</p>
+      <dl v-if="value" class="meta">
+        <dt>Värde</dt>
+        <dd>{{ value }}</dd>
+      </dl>
+      <dl class="meta">
+        <dt>Status</dt>
+        <dd>{{ completed ? 'Klart' : 'Väntar' }}</dd>
+      </dl>
+      <p v-if="remaining" class="lock"><Lock :size="15" /> Poppa de {{ remaining }} mindre bubblorna först</p>
+      <Checklist v-if="node.sub_steps?.length" :items="node.sub_steps" @reopen="emit('reopen', $event)" />
+    </template>
+
+    <template #actions>
+      <template v-if="confirming">
+        <button class="btn ghost" @click="confirming = false"><X :size="16" /> Avbryt</button>
+        <button class="btn danger" @click="emit('remove')"><Trash2 :size="16" /> Ta bort</button>
+      </template>
+      <template v-else-if="editing">
+        <button class="btn ghost" type="button" @click="editing = false"><X :size="16" /> Avbryt</button>
+        <button class="btn primary" type="submit" form="node-edit" :disabled="!valid"><Save :size="16" /> Spara</button>
+      </template>
+      <template v-else>
+        <button class="btn ghost" @click="emit('close')"><X :size="16" /> Avbryt</button>
+        <button class="btn primary" :disabled="remaining > 0 || completed" @click="emit('done')">
+          <Check :size="16" /> Klart
+        </button>
+      </template>
+    </template>
+  </Card>
+</template>
