@@ -159,6 +159,22 @@ function openMenu(e, r) {
   menu.value = { x: e.clientX, y: e.clientY, id: r.id }
 }
 
+let press = 0
+
+function rowDown(e, r) {
+  if (e.pointerType === 'mouse' || e.target.closest('input, textarea, .grip')) return
+  const { clientX: x, clientY: y } = e
+  clearTimeout(press)
+  press = setTimeout(() => {
+    openMenu({ clientX: x, clientY: y }, r)
+    navigator.vibrate?.(15)
+  }, 500)
+}
+
+function rowCancel() {
+  clearTimeout(press)
+}
+
 function menuAction(kind) {
   const i = rows.value.findIndex((r) => r.id === menu.value.id)
   menu.value = null
@@ -282,6 +298,10 @@ onBeforeUnmount(() => {
           dragging: drag && i >= drag.from && i < drag.end
         }"
         @contextmenu.prevent="openMenu($event, r)"
+        @pointerdown="rowDown($event, r)"
+        @pointerup="rowCancel"
+        @pointermove="rowCancel"
+        @pointercancel="rowCancel"
       >
         <div class="grip" :class="{ off: isBlank(r) }" title="Dra för att flytta" @pointerdown="startDrag($event, r)">
           <GripVertical :size="15" />

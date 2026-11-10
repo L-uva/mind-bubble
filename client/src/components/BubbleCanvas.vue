@@ -159,19 +159,71 @@ function pointer(e) {
 }
 
 let pan = null
+let pinch = null
+let press = 0
+const touches = new Map()
+
+function trackDown(e) {
+  if (e.pointerType === 'mouse') return
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  if (touches.size !== 2) return
+  clearTimeout(press)
+  if (down) world.endDrag()
+  down = null
+  pan = null
+  focusId = null
+  hover.value = null
+  const [a, b] = [...touches.values()]
+  const r = svg.value.getBoundingClientRect()
+  pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, cx: (a.x + b.x) / 2 - r.left, cy: (a.y + b.y) / 2 - r.top, v: { ...view.value } }
+}
+
+function trackMove(e) {
+  if (!touches.has(e.pointerId)) return
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  if (!pinch || touches.size < 2) return
+  const [a, b] = [...touches.values()]
+  const r = svg.value.getBoundingClientRect()
+  const cx = (a.x + b.x) / 2 - r.left
+  const cy = (a.y + b.y) / 2 - r.top
+  const k = Math.min(3, Math.max(0.25, pinch.v.k * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d)))
+  const wx = (pinch.cx - pinch.v.x) / pinch.v.k
+  const wy = (pinch.cy - pinch.v.y) / pinch.v.k
+  view.value = { k, x: cx - wx * k, y: cy - wy * k }
+  auto = false
+}
+
+function trackUp(e) {
+  touches.delete(e.pointerId)
+  if (touches.size < 2) pinch = null
+}
 
 function onBgDown(e) {
   if (e.pointerType === 'mouse' && e.button !== 0) return
+  if (touches.size > 1) return
   pan = { x: e.clientX, y: e.clientY, vx: view.value.x, vy: view.value.y }
   svg.value.setPointerCapture(e.pointerId)
 }
 
 function onDown(e, n) {
   if (e.pointerType === 'mouse' && e.button !== 0) return
+  if (touches.size > 1) return
   hover.value = null
   focusId = n.id
   const p = pointer(e)
-  down = { n, x: p.x, y: p.y, ox: p.x - n.x, oy: p.y - n.y, moved: false }
+  down = { n, x: p.x, y: p.y, ox: p.x - n.x, oy: p.y - n.y, moved: false, long: false, touch: e.pointerType !== 'mouse' }
+  if (down.touch) {
+    const d = down
+    const { clientX: cx, clientY: cy } = e
+    clearTimeout(press)
+    press = setTimeout(() => {
+      if (down !== d || d.moved) return
+      d.long = true
+      hover.value = { n, x: cx, y: cy - 60 }
+      navigator.vibrate?.(15)
+      emit('select', n.id)
+    }, 500)
+  }
   svg.value.setPointerCapture(e.pointerId)
 }
 
@@ -185,21 +237,27 @@ function onMove(e) {
   const p = pointer(e)
   if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 5) {
     down.moved = true
+    clearTimeout(press)
     if (!down.n.isRoot) world.startDrag(down.n.id, p.x - down.ox, p.y - down.oy)
   }
   if (down.moved) world.moveDrag(p.x - down.ox, p.y - down.oy)
 }
 
 function onUp(e) {
+  clearTimeout(press)
   if (pan) {
     pan = null
     return
   }
   if (!down) return
-  if (!down.moved) emit(props.adding || down.n.isRoot ? 'select' : 'pop', down.n.id)
+  if (!down.moved && !down.long) emit(props.adding || down.n.isRoot ? 'select' : 'pop', down.n.id)
   world.endDrag()
+  const touch = down.touch
   down = null
-  if (!document.elementFromPoint(e.clientX, e.clientY)?.closest('.bubble')) focusId = null
+  if (touch) {
+    focusId = null
+    hover.value = null
+  } else if (!document.elementFromPoint(e.clientX, e.clientY)?.closest('.bubble')) focusId = null
 }
 
 function onEnter(e, n) {
@@ -299,11 +357,12 @@ onBeforeUnmount(() => {
     ref="svg"
     class="canvas"
     :class="{ adding }"
+    @pointerdown.capture="trackDown"
     @pointerdown.self="onBgDown"
     @wheel.prevent="onWheel"
-    @pointermove="onMove"
-    @pointerup="onUp"
-    @pointercancel="onUp"
+    @pointermove="trackMove($event); onMove($event)"
+    @pointerup="trackUp($event); onUp($event)"
+    @pointercancel="trackUp($event); onUp($event)"
   >
     <g class="world" :transform="`translate(${view.x} ${view.y}) scale(${view.k})`">
     <g class="edges">
