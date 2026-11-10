@@ -40,6 +40,8 @@ export class World {
     this.vh = 600
     this.saved = null
     this.s = 1
+    this.spacing = 22
+    this.live = true
     this.time = 0
     this.drag = null
   }
@@ -175,7 +177,7 @@ export class World {
       const c = kids.get(n.id) || []
       return c.length ? c.reduce((a, k) => a + weight(k), 0) : 1
     }
-    const gap = 44 * this.s
+    const gap = this.spacing * 2 * this.s
     const place = (parent, a0, a1) => {
       const c = kids.get(parent.id) || []
       const total = c.reduce((a, k) => a + weight(k), 0)
@@ -222,18 +224,19 @@ export class World {
     const t = this.time
     const s = this.s
     const nodes = this.nodes
-    const gap = 44 * s
+    const gap = this.spacing * 2 * s
     const range = 70 * s
     const kSpring = 14
     const kRep = 260
-    const damp = Math.exp(-2.3 * dt)
+    const damp = Math.exp((this.live ? -2.3 : -7) * dt)
     const e = 0.82
+    const wander = this.live ? 38 : 0
 
     for (const n of nodes) {
       n.fx = n.fy = 0
       n.m = Math.pow(n.r0 / 40, 2)
       n.appear = Math.min(1, (t - n.born) / 0.55)
-      const pulse = 1 + 0.035 * Math.sin(t * n.pulseW + n.phase)
+      const pulse = this.live ? 1 + 0.035 * Math.sin(t * n.pulseW + n.phase) : 1
       n.R = n.r0 * pulse * Math.max(0.35, n.appear)
       n.angle += n.rot * dt
     }
@@ -280,8 +283,8 @@ export class World {
 
     for (const n of nodes) {
       if (n.fixed) continue
-      const ax = n.fx / n.m + Math.cos(t * n.wf1 + n.wp1) * 38
-      const ay = n.fy / n.m + Math.sin(t * n.wf2 + n.wp2) * 38
+      const ax = n.fx / n.m + Math.cos(t * n.wf1 + n.wp1) * wander
+      const ay = n.fy / n.m + Math.sin(t * n.wf2 + n.wp2) * wander
       n.vx = (n.vx + ax * dt) * damp
       n.vy = (n.vy + ay * dt) * damp
     }
@@ -304,6 +307,7 @@ export class World {
     for (const n of nodes) {
       if (n.fixed) continue
       const sp = Math.hypot(n.vx, n.vy)
+      if (!this.live && sp < 8 && this.drag?.id !== n.id) n.vx = n.vy = 0
       const max = this.drag && this.drag.id === n.id ? 1800 : 700
       if (sp > max) {
         n.vx = (n.vx / sp) * max

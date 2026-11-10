@@ -8,7 +8,9 @@ const props = defineProps({
   title: { type: String, default: '' },
   steps: { type: Array, default: () => [] },
   adding: { type: Boolean, default: false },
-  layoutKey: { type: String, default: '' }
+  layoutKey: { type: String, default: '' },
+  spacing: { type: Number, default: 22 },
+  live: { type: Boolean, default: true }
 })
 const emit = defineEmits(['select', 'pop', 'link'])
 
@@ -23,6 +25,12 @@ const svg = ref(null)
 const fx = ref(null)
 const views = shallowRef([])
 const world = new World()
+world.spacing = props.spacing
+world.live = props.live
+watch(() => [props.spacing, props.live], ([sp, lv]) => {
+  world.spacing = sp
+  world.live = lv
+})
 let raf = 0
 let last = 0
 let down = null

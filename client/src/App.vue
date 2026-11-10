@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, provide, onMounted, onBeforeUnmount } from 'vue'
-import { Sun, Moon, Library as LibraryIcon, X } from 'lucide-vue-next'
+import { Library as LibraryIcon, X } from 'lucide-vue-next'
 import { api } from './api.js'
 import {
   allAncestors,
@@ -34,6 +34,11 @@ const adding = ref(false)
 const view = ref('bubbles')
 const notice = ref('')
 const library = ref(false)
+const settings = ref({ spacing: 22, live: true, ...JSON.parse(localStorage.getItem('settings') || '{}') })
+function updateSettings(p) {
+  settings.value = { ...settings.value, ...p }
+  localStorage.setItem('settings', JSON.stringify(settings.value))
+}
 const theme = ref(localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'))
 
 const ix = computed(() => index(doc.value?.steps))
@@ -400,6 +405,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :title="doc.project.title"
     :steps="doc.steps"
     :adding="adding"
+    :spacing="settings.spacing"
+    :live="settings.live"
     @select="onSelect"
     @pop="onPop"
     @link="dragLink"
@@ -412,11 +419,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   </div>
 
   <div v-if="doc" class="chip">{{ doc.machine.type }} · {{ doc.machine.number }}</div>
-  <button class="icon-btn theme" :title="theme === 'dark' ? 'Ljust läge' : 'Mörkt läge'" @click="toggleTheme">
-    <Sun v-if="theme === 'dark'" :size="18" />
-    <Moon v-else :size="18" />
-  </button>
-
   <Transition name="banner">
     <div v-if="notice" class="banner warn-banner">{{ notice }}</div>
   </Transition>
@@ -434,6 +436,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :can-undo="history.undo > 0"
     :can-redo="history.redo > 0"
     :current="doc?.machine.number"
+    :theme="theme"
+    :settings="settings"
+    @theme="toggleTheme"
+    @settings="updateSettings"
     @add-step="startAdding"
     @save-template="card = { type: 'template' }"
     @library="library = true"
@@ -484,6 +490,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   <Library
     v-if="library"
     :current="doc?.machine.number"
+    :theme="theme"
+    :settings="settings"
+    @theme="toggleTheme"
+    @settings="updateSettings"
     :machine-types="config.machineTypes"
     @close="library = false"
     @open="openProject"

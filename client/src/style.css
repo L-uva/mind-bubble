@@ -1250,3 +1250,65 @@ kbd {
   margin: 0 7px 0 3px;
   color: var(--accent);
 }
+.has-sub.show .submenu {
+  display: grid;
+}
+
+.settings .submenu {
+  min-width: 250px;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.set-col {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.set-col b {
+  float: right;
+  color: var(--muted, #888);
+}
+
+.set-col input {
+  width: 100%;
+  accent-color: #7c8cf0;
+}
+
+.fab-menu .switch {
+  width: 42px;
+  height: 24px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--border);
+  flex: none;
+  transition: background 0.15s;
+}
+
+.fab-menu .switch.on {
+  background: #7c8cf0;
+}
+
+.switch i {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.switch.on i {
+  transform: translateX(18px);
+}

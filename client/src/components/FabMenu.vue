@@ -11,6 +11,7 @@ import {
   Table2,
   CircleDot,
   History,
+  Settings,
   ChevronLeft,
   Check
 } from 'lucide-vue-next'
@@ -22,11 +23,18 @@ const props = defineProps({
   view: { type: String, default: 'bubbles' },
   canUndo: Boolean,
   canRedo: Boolean,
-  current: { type: Number, default: null }
+  current: { type: Number, default: null },
+  theme: { type: String, default: 'light' },
+  settings: { type: Object, default: () => ({}) }
 })
-const emit = defineEmits(['add-step', 'save-template', 'library', 'view', 'undo', 'redo', 'open'])
+const emit = defineEmits(['add-step', 'save-template', 'library', 'view', 'undo', 'redo', 'open', 'theme', 'settings'])
 const open = ref(false)
 const recent = ref([])
+const showSettings = ref(false)
+
+watch(open, (v) => {
+  if (!v) showSettings.value = false
+})
 
 watch(open, async (v) => {
   if (!v) return
@@ -82,6 +90,24 @@ function pick(name, ...args) {
         </div>
         <button :disabled="disabled" @click="pick('save-template')"><BookmarkPlus :size="18" /> Spara som mall</button>
         <button @click="pick('library')"><Library :size="18" /> Bibliotek</button>
+        <hr />
+        <div class="has-sub settings" :class="{ show: showSettings }">
+          <button @click="showSettings = !showSettings"><Settings :size="18" /> Inställningar <ChevronLeft :size="15" class="end" /></button>
+          <div class="submenu">
+            <div class="set-row">
+              <span>Mörkt läge</span>
+              <button class="switch" :class="{ on: theme === 'dark' }" role="switch" :aria-checked="theme === 'dark'" @click="emit('theme')"><i /></button>
+            </div>
+            <div class="set-row">
+              <span>Pulserande bubblor</span>
+              <button class="switch" :class="{ on: settings.live }" role="switch" :aria-checked="!!settings.live" @click="emit('settings', { live: !settings.live })"><i /></button>
+            </div>
+            <div class="set-col">
+              <span>Avstånd <b>{{ settings.spacing }}</b></span>
+              <input type="range" min="5" max="40" step="1" :value="settings.spacing" @input="emit('settings', { spacing: Number($event.target.value) })" />
+            </div>
+          </div>
+        </div>
       </div>
     </Transition>
     <button class="fab" :class="{ open }" aria-label="Meny" @click="open = !open">
