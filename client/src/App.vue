@@ -1,8 +1,19 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Sun, Moon, Library as LibraryIcon, X } from 'lucide-vue-next'
+import { ref, computed, provide, onMounted, onBeforeUnmount } from 'vue'
+import { Library as LibraryIcon, X } from 'lucide-vue-next'
 import { api } from './api.js'
-import { ancestors, find, newId, pendingBelow, percent as calcPercent, stepHue } from './tree.js'
+import {
+  allAncestors,
+  find,
+  index,
+  linksTo,
+  newId,
+  pendingBelow,
+  percent as calcPercent,
+  reaches,
+  removeLinksTo,
+  stepHue
+} from './tree.js'
 import { ROOT_ID } from './physics.js'
 import { touchRecent } from './recent.js'
 import BubbleCanvas from './components/BubbleCanvas.vue'
@@ -11,6 +22,7 @@ import FabMenu from './components/FabMenu.vue'
 import NodeCard from './components/NodeCard.vue'
 import RootCard from './components/RootCard.vue'
 import StepForm from './components/StepForm.vue'
+import LinkPicker from './components/LinkPicker.vue'
 import TemplateForm from './components/TemplateForm.vue'
 import Library from './components/Library.vue'
 
@@ -22,13 +34,22 @@ const adding = ref(false)
 const view = ref('bubbles')
 const notice = ref('')
 const library = ref(false)
+const settings = ref({ spacing: 22, live: true, cluster: 0, ...JSON.parse(localStorage.getItem('settings') || '{}') })
+function updateSettings(p) {
+  settings.value = { ...settings.value, ...p }
+  localStorage.setItem('settings', JSON.stringify(settings.value))
+}
 const theme = ref(localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'))
+
+const ix = computed(() => index(doc.value?.steps))
+provide('ix', ix)
 
 const pct = computed(() => (doc.value ? calcPercent(doc.value.steps) : 0))
 const cardNode = computed(() => (card.value?.id && doc.value ? find(doc.value.steps, card.value.id) : null))
 
 function trail(list, target, acc) {
   for (const s of list) {
+    if (s.ref) continue
     if (s.id === target) return acc
     const r = trail(s.sub_steps ?? [], target, [...acc, s.title])
     if (r) return r
@@ -38,6 +59,78 @@ function trail(list, target, acc) {
 const cardPath = computed(() =>
   cardNode.value ? trail(doc.value.steps, card.value.id, [doc.value.project.title]) ?? [] : []
 )
+const shared = computed(() =>
+  cardNode.value
+    ? linksTo(doc.value.steps, card.value.id).map(({ link, parent }) => ({
+        refId: link.id,
+        parentTitle: parent ? parent.title : doc.value.project.title
+      }))
+    : []
+)
+
+function linkCandidates() {
+  const id = card.value?.id
+  const parent = !id || id === ROOT_ID ? null : ix.value.get(id)
+  const children = parent ? parent.sub_steps ?? [] : doc.value.steps
+  const taken = new Set(children.map((c) => c.ref ?? c.id))
+  const names = new Map()
+  const walk = (list, path) => {
+    for (const s of list) {
+      if (s.ref) continue
+      names.set(s.id, path)
+      walk(s.sub_steps ?? [], [...path, s.title])
+    }
+  }
+  walk(doc.value.steps, [doc.value.project.title])
+  return [...ix.value.values()]
+    .filter((t) => !taken.has(t.id) && !(parent && reaches(t, parent, ix.value)))
+    .map((t) => ({ id: t.id, title: t.title, path: names.get(t.id).join(' › ') }))
+}
+
+function addLink(targetId) {
+  const id = card.value.id
+  card.value = null
+  linkUnder(id, targetId)
+}
+
+function dragLink(parentId, targetId) {
+  const parent = parentId === ROOT_ID ? null : ix.value.get(parentId)
+  const target = ix.value.get(targetId)
+  if (!target || (parentId !== ROOT_ID && !parent)) return
+  const kidsOf = parent ? parent.sub_steps ?? [] : doc.value.steps
+  if (kidsOf.some((c) => (c.ref ?? c.id) === targetId)) return flash('Redan länkad hit')
+  if (parent && reaches(target, parent, ix.value)) return flash('Skulle bli en cirkel')
+  linkUnder(parentId, targetId)
+}
+
+function linkUnder(id, targetId) {
+  const link = { id: newId(), ref: targetId }
+  if (!id || id === ROOT_ID) doc.value.steps.push(link)
+  else {
+    const { node } = find(doc.value.steps, id)
+    node.sub_steps = [...(node.sub_steps ?? []), link]
+  }
+  save()
+}
+
+function unlink(refId) {
+  const walk = (list) => {
+    const i = list.findIndex((c) => c.id === refId)
+    if (i >= 0) {
+      list.splice(i, 1)
+      return true
+    }
+    return list.some((s) => {
+      if (!s.sub_steps || !walk(s.sub_steps)) return false
+      if (!s.sub_steps.length) delete s.sub_steps
+      return true
+    })
+  }
+  walk(doc.value.steps)
+  card.value = null
+  save()
+}
+
 const stepParentTitle = computed(() => {
   const id = card.value?.id
   return !id || id === ROOT_ID ? doc.value?.project.title : find(doc.value.steps, id)?.node.title
@@ -179,14 +272,17 @@ function popNode() {
 }
 
 let noticeTimer
+function flash(msg) {
+  notice.value = msg
+  clearTimeout(noticeTimer)
+  noticeTimer = setTimeout(() => (notice.value = ''), 2200)
+}
 function onPop(id) {
   const found = find(doc.value.steps, id)
   if (!found || found.node.status === 'completed') return
-  const left = pendingBelow(found.node)
+  const left = pendingBelow(found.node, ix.value)
   if (left) {
-    notice.value = `Poppa de ${left} mindre bubblorna först`
-    clearTimeout(noticeTimer)
-    noticeTimer = setTimeout(() => (notice.value = ''), 2200)
+    flash(`Poppa de ${left} mindre bubblorna först`)
     return
   }
   pop(found.node)
@@ -231,7 +327,14 @@ function removeNode() {
   const { node, parent } = cardNode.value
   const list = parent ? parent.sub_steps : doc.value.steps
   canvas.value.playPop(node.id)
+  const owned = new Set()
+  const collect = (n) => {
+    owned.add(n.id)
+    for (const c of n.sub_steps ?? []) if (!c.ref) collect(c)
+  }
+  collect(node)
   list.splice(list.indexOf(node), 1)
+  removeLinksTo(doc.value.steps, owned)
   if (parent && !list.length) delete parent.sub_steps
   card.value = null
   save()
@@ -249,9 +352,9 @@ function editProject(data) {
 }
 
 function reopen(id) {
-  const chain = ancestors(doc.value.steps, id)
-  if (!chain) return
-  for (const n of [...chain, find(doc.value.steps, id).node]) n.status = 'pending'
+  const node = ix.value.get(id)
+  if (!node) return
+  for (const n of [...allAncestors(id, ix.value), node]) n.status = 'pending'
   save()
 }
 
@@ -265,7 +368,8 @@ function startAdding() {
 function onKey(e) {
   if ((e.ctrlKey || e.metaKey) && !e.altKey) {
     const k = e.key.toLowerCase()
-    if (!['a', 'z', 'y'].includes(k) || e.target.closest?.('input, textarea, select')) return
+    if (!['a', 'z', 'y'].includes(k)) return
+    if (e.target.closest?.('input, textarea, select') && (view.value === 'bubbles' || k === 'a')) return
     e.preventDefault()
     if (k === 'a' && !e.shiftKey) startAdding()
     else if (k === 'y' || (k === 'z' && e.shiftKey)) redo()
@@ -301,8 +405,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :title="doc.project.title"
     :steps="doc.steps"
     :adding="adding"
+    :spacing="settings.spacing"
+    :live="settings.live"
+    :cluster="settings.cluster"
     @select="onSelect"
     @pop="onPop"
+    @link="dragLink"
   />
   <TableEditor v-else-if="doc" :key="doc.machine.number" :doc="doc" :revision="revision" @change="onTableChange" />
   <div v-else class="empty-state">
@@ -312,11 +420,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   </div>
 
   <div v-if="doc" class="chip">{{ doc.machine.type }} · {{ doc.machine.number }}</div>
-  <button class="icon-btn theme" :title="theme === 'dark' ? 'Ljust läge' : 'Mörkt läge'" @click="toggleTheme">
-    <Sun v-if="theme === 'dark'" :size="18" />
-    <Moon v-else :size="18" />
-  </button>
-
   <Transition name="banner">
     <div v-if="notice" class="banner warn-banner">{{ notice }}</div>
   </Transition>
@@ -334,6 +437,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :can-undo="history.undo > 0"
     :can-redo="history.redo > 0"
     :current="doc?.machine.number"
+    :theme="theme"
+    :settings="settings"
+    @theme="toggleTheme"
+    @settings="updateSettings"
     @add-step="startAdding"
     @save-template="card = { type: 'template' }"
     @library="library = true"
@@ -349,6 +456,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :node="cardNode.node"
     :path="cardPath"
     :hue="cardNode.parent ? null : stepHue(doc.steps, cardNode.node)"
+    :ix="ix"
+    :shared="shared"
+    @unlink="unlink"
     @close="card = null"
     @done="popNode"
       @edit="editNode"
@@ -356,7 +466,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     @color="setColor"
     @reopen="reopen"
   />
-  <StepForm v-if="doc && card?.type === 'step'" :parent-title="stepParentTitle" @close="card = null" @save="addStep" />
+  <LinkPicker
+    v-if="doc && card?.type === 'link'"
+    :where="`Läggs under: ${stepParentTitle}`"
+    :candidates="linkCandidates()"
+    @close="card = null"
+    @pick="addLink"
+  />
+  <StepForm
+    v-if="doc && card?.type === 'step'"
+    can-link
+    :parent-title="stepParentTitle"
+    @close="card = null"
+    @save="addStep"
+    @link="card = { type: 'link', id: card.id }"
+  />
   <TemplateForm
     v-if="doc && card?.type === 'template'"
     :doc="doc"
@@ -367,6 +491,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   <Library
     v-if="library"
     :current="doc?.machine.number"
+    :theme="theme"
+    :settings="settings"
+    @theme="toggleTheme"
+    @settings="updateSettings"
     :machine-types="config.machineTypes"
     @close="library = false"
     @open="openProject"

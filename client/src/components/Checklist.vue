@@ -1,22 +1,29 @@
 <script setup>
-import { Check, Circle } from 'lucide-vue-next'
+import { Check, Circle, Link2 } from 'lucide-vue-next'
+import { inject } from 'vue'
 import { isDone } from '../tree.js'
 
 defineOptions({ name: 'Checklist' })
 defineProps({ items: Array })
 defineEmits(['reopen'])
+
+const ix = inject('ix', { value: new Map() })
+const real = (s) => (s.ref ? ix.value.get(s.ref) : s)
 </script>
 
 <template>
   <ul class="checklist">
-    <li v-for="s in items" :key="s.id" :class="{ done: isDone(s) }">
-      <Check v-if="isDone(s)" :size="15" />
-      <Circle v-else :size="15" />
-      <button v-if="isDone(s)" class="reopen" title="Blås upp bubblan igen" @click="$emit('reopen', s.id)">
-        {{ s.title }}
-      </button>
-      <span v-else>{{ s.title }}</span>
-      <Checklist v-if="s.sub_steps?.length" :items="s.sub_steps" @reopen="$emit('reopen', $event)" />
-    </li>
+    <template v-for="c in items" :key="c.id">
+      <li v-if="real(c)" :class="{ done: isDone(real(c)) }">
+        <Check v-if="isDone(real(c))" :size="15" />
+        <Circle v-else :size="15" />
+        <button v-if="isDone(real(c))" class="reopen" title="Blås upp bubblan igen" @click="$emit('reopen', real(c).id)">
+          {{ real(c).title }}
+        </button>
+        <span v-else>{{ real(c).title }}</span>
+        <Link2 v-if="c.ref" :size="13" class="muted" title="Delad bubbla" />
+        <Checklist v-if="!c.ref && c.sub_steps?.length" :items="c.sub_steps" @reopen="$emit('reopen', $event)" />
+      </li>
+    </template>
   </ul>
 </template>

@@ -1,14 +1,20 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { Check, X, Lock, Pencil, Save, Trash2 } from 'lucide-vue-next'
+import { Check, X, Lock, Pencil, Save, Trash2, Link2 } from 'lucide-vue-next'
 import Card from './Card.vue'
 import Checklist from './Checklist.vue'
 import { HUES, count, pendingBelow, valueText } from '../tree.js'
 
-const props = defineProps({ node: Object, path: Array, hue: { type: Number, default: null } })
-const emit = defineEmits(['close', 'done', 'reopen', 'edit', 'remove', 'color'])
+const props = defineProps({
+  node: Object,
+  path: Array,
+  hue: { type: Number, default: null },
+  ix: Map,
+  shared: { type: Array, default: () => [] }
+})
+const emit = defineEmits(['close', 'done', 'reopen', 'edit', 'remove', 'color', 'unlink'])
 
-const remaining = computed(() => pendingBelow(props.node))
+const remaining = computed(() => pendingBelow(props.node, props.ix))
 const subCount = computed(() => count(props.node.sub_steps).total)
 const confirming = ref(false)
 const completed = computed(() => props.node.status === 'completed')
@@ -59,6 +65,9 @@ function submit() {
       <p v-if="subCount" class="warn">
         {{ subCount }} delsteg under bubblan tas också bort permanent.
       </p>
+      <p v-if="shared.length" class="warn">
+        Bubblan delas med {{ shared.length }} andra grenar. Länkarna tas också bort.
+      </p>
       <p class="muted">Detta kan inte ångras.</p>
     </div>
     <form v-else-if="editing" id="node-edit" class="form" @submit.prevent="submit">
@@ -104,6 +113,12 @@ function submit() {
         <dd>{{ completed ? 'Klart' : 'Väntar' }}</dd>
       </dl>
       <p v-if="remaining" class="lock"><Lock :size="15" /> Poppa de {{ remaining }} mindre bubblorna först</p>
+      <ul v-if="shared.length" class="shared-list">
+        <li v-for="s in shared" :key="s.refId">
+          <Link2 :size="14" /> Delas även under <strong>{{ s.parentTitle }}</strong>
+          <button class="icon-btn" title="Ta bort länken" @click="emit('unlink', s.refId)"><X :size="14" /></button>
+        </li>
+      </ul>
       <Checklist v-if="node.sub_steps?.length" :items="node.sub_steps" @reopen="emit('reopen', $event)" />
     </template>
 

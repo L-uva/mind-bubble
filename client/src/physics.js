@@ -40,6 +40,10 @@ export class World {
     this.vh = 600
     this.saved = null
     this.s = 1
+    this.spacing = 22
+    this.live = true
+    this.cluster = 0
+    this.awake = 0
     this.time = 0
     this.drag = null
   }
@@ -146,6 +150,7 @@ export class World {
         }
       }
       n.parentId = it.parentId
+      n.links = it.links ?? []
       n.level = it.level
       n.hue = it.hue
       n.r0 = this.radiusFor(it.level)
@@ -174,7 +179,7 @@ export class World {
       const c = kids.get(n.id) || []
       return c.length ? c.reduce((a, k) => a + weight(k), 0) : 1
     }
-    const gap = 44 * this.s
+    const gap = this.spacing * 2 * this.s
     const place = (parent, a0, a1) => {
       const c = kids.get(parent.id) || []
       const total = c.reduce((a, k) => a + weight(k), 0)
@@ -199,6 +204,10 @@ export class World {
     place(root, -Math.PI / 2, -Math.PI / 2 + TAU)
   }
 
+  wake() {
+    this.awake = this.time + 5
+  }
+
   startDrag(id, tx, ty) {
     const n = this.map.get(id)
     if (!n || n.fixed) return
@@ -221,36 +230,42 @@ export class World {
     const t = this.time
     const s = this.s
     const nodes = this.nodes
-    const gap = 44 * s
+    const gap = this.spacing * 2 * s
     const range = 70 * s
     const kSpring = 14
     const kRep = 260
-    const damp = Math.exp(-2.3 * dt)
+    const damp = Math.exp((this.live ? -2.3 : -7) * dt)
     const e = 0.82
+    const cl = this.cluster
+    const wander = this.live ? 38 : 0
 
     for (const n of nodes) {
       n.fx = n.fy = 0
       n.m = Math.pow(n.r0 / 40, 2)
       n.appear = Math.min(1, (t - n.born) / 0.55)
-      const pulse = 1 + 0.035 * Math.sin(t * n.pulseW + n.phase)
+      const pulse = this.live ? 1 + 0.035 * Math.sin(t * n.pulseW + n.phase) : 1
       n.R = n.r0 * pulse * Math.max(0.35, n.appear)
       n.angle += n.rot * dt
     }
 
     for (const n of nodes) {
       if (n.isRoot) continue
-      const p = this.map.get(n.parentId)
-      if (!p) continue
-      let dx = n.x - p.x
-      let dy = n.y - p.y
-      const d = Math.hypot(dx, dy) || 0.001
-      dx /= d
-      dy /= d
-      const f = kSpring * (d - (p.r0 + n.r0 + gap))
-      n.fx -= f * dx
-      n.fy -= f * dy
-      p.fx += f * dx
-      p.fy += f * dy
+      const ps = [n.parentId, ...(n.links ?? [])]
+      for (let k = 0; k < ps.length; k++) {
+        const p = this.map.get(ps[k])
+        if (!p) continue
+        let dx = n.x - p.x
+        let dy = n.y - p.y
+        const d = Math.hypot(dx, dy) || 0.001
+        dx /= d
+        dy /= d
+        const rest = p.r0 + n.r0 + gap * (k ? 2 : 1 - 0.25 * cl)
+        const f = kSpring * (k ? 0.5 : 1 + 0.8 * cl) * (d - rest)
+        n.fx -= f * dx
+        n.fy -= f * dy
+        p.fx += f * dx
+        p.fy += f * dy
+      }
     }
 
     for (let i = 0; i < nodes.length; i++) {
@@ -260,12 +275,15 @@ export class World {
         let dx = b.x - a.x
         let dy = b.y - a.y
         const d = Math.hypot(dx, dy) || 0.001
+        const sib = a.parentId === b.parentId
+        const far = cl && !sib && a.parentId !== b.id && b.parentId !== a.id
+        const rng = far ? range * (1 + 1.2 * cl) : range
         const g = d - a.R - b.R
-        if (g >= range) continue
+        if (g >= rng) continue
         dx /= d
         dy /= d
-        const k = 1 - Math.max(0, g) / range
-        const f = kRep * k * k
+        const k = 1 - Math.max(0, g) / rng
+        const f = kRep * k * k * (far ? 1 + 1.5 * cl : sib && cl ? Math.max(0.4, 1 - 0.3 * cl) : 1)
         a.fx -= f * dx
         a.fy -= f * dy
         b.fx += f * dx
@@ -275,8 +293,8 @@ export class World {
 
     for (const n of nodes) {
       if (n.fixed) continue
-      const ax = n.fx / n.m + Math.cos(t * n.wf1 + n.wp1) * 38
-      const ay = n.fy / n.m + Math.sin(t * n.wf2 + n.wp2) * 38
+      const ax = n.fx / n.m + Math.cos(t * n.wf1 + n.wp1) * wander
+      const ay = n.fy / n.m + Math.sin(t * n.wf2 + n.wp2) * wander
       n.vx = (n.vx + ax * dt) * damp
       n.vy = (n.vy + ay * dt) * damp
     }
@@ -299,6 +317,7 @@ export class World {
     for (const n of nodes) {
       if (n.fixed) continue
       const sp = Math.hypot(n.vx, n.vy)
+      if (!this.live && sp < 8 && t > this.awake && this.drag?.id !== n.id) n.vx = n.vy = 0
       const max = this.drag && this.drag.id === n.id ? 1800 : 700
       if (sp > max) {
         n.vx = (n.vx / sp) * max

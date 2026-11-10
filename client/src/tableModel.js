@@ -1,8 +1,10 @@
-import { newId } from './tree.js'
+import { index, newId, reaches } from './tree.js'
 
 // The table works on a flat outline: a row's parent is the closest row above it with a smaller depth.
 
-export const isBlank = (r) => !r.title.trim() && !r.description.trim()
+export const isBlank = (r) => !r.ref && !r.title.trim() && !r.description.trim()
+
+export const linkRow = (target, depth) => ({ id: newId(), depth, ref: target, title: '', description: '', done: false, extra: {} })
 
 export function blankRow(depth = 1) {
   return { id: newId(), depth, title: '', description: '', done: false, extra: {} }
@@ -12,6 +14,11 @@ export function flatten(steps) {
   const rows = []
   const walk = (list, depth) => {
     for (const s of list ?? []) {
+      if (s.ref) {
+        rows.push(linkRow(s.ref, depth))
+        rows[rows.length - 1].id = s.id ?? newId()
+        continue
+      }
       const { id, title, description, status, sub_steps, ...extra } = s
       rows.push({
         id: id ?? newId(),
@@ -30,9 +37,11 @@ export function flatten(steps) {
 
 export function build(rows) {
   const out = []
+  const real = new Set(rows.filter((r) => !r.ref && r.title.trim()).map((r) => r.id))
   const stack = [out]
   const prune = (list) => {
     for (const n of list) {
+      if (n.ref) continue
       if (n.sub_steps.length) prune(n.sub_steps)
       else delete n.sub_steps
     }
@@ -41,6 +50,10 @@ export function build(rows) {
     stack.length = Math.min(stack.length, r.depth)
     while (stack.length < r.depth) stack.push(stack[stack.length - 1])
     const list = stack[r.depth - 1]
+    if (r.ref) {
+      if (real.has(r.ref)) list.push({ id: r.id, ref: r.ref })
+      continue
+    }
     if (!r.title.trim()) {
       stack[r.depth] = list
       continue
@@ -65,11 +78,38 @@ export function build(rows) {
   return out
 }
 
+// A link row has no children, so the row after it can be at most as deep as the link itself.
 export function normalize(rows) {
-  let prev = 0
+  let max = 1
   for (const r of rows) {
-    r.depth = Math.max(1, Math.min(r.depth, prev + 1))
-    prev = r.depth
+    r.depth = Math.max(1, Math.min(r.depth, max))
+    max = r.ref ? r.depth : r.depth + 1
+  }
+}
+
+// Drops link rows whose bubble is gone or that would make a bubble contain itself.
+export function pruneLinks(rows) {
+  for (let pass = 0; pass < rows.length; pass++) {
+    const ids = new Set(rows.filter((r) => !r.ref).map((r) => r.id))
+    const steps = build(rows)
+    const ix = index(steps)
+    const bad = new Set()
+    const cyc = []
+    const walk = (list, owner) => {
+      for (const s of list) {
+        if (s.ref) {
+          const t = ix.get(s.ref)
+          if (owner && t && reaches(t, owner, ix)) cyc.push(s.id)
+        } else walk(s.sub_steps ?? [], s)
+      }
+    }
+    walk(steps, null)
+    for (const r of rows) if (r.ref && !ids.has(r.ref)) bad.add(r.id)
+    const last = rows.map((r) => r.id).filter((id) => cyc.includes(id)).pop()
+    if (last) bad.add(last)
+    if (!bad.size) return
+    for (let i = rows.length - 1; i >= 0; i--) if (bad.has(rows[i].id)) rows.splice(i, 1)
+    normalize(rows)
   }
 }
 

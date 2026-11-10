@@ -1,10 +1,10 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { X, Save } from 'lucide-vue-next'
+import { X, Save, Link2 } from 'lucide-vue-next'
 import Card from './Card.vue'
 
-const props = defineProps({ parentTitle: String })
-const emit = defineEmits(['close', 'save'])
+const props = defineProps({ parentTitle: String, canLink: Boolean })
+const emit = defineEmits(['close', 'save', 'link'])
 
 const title = ref('')
 const description = ref('')
@@ -33,6 +33,9 @@ function submit() {
       </div>
     </form>
     <template #actions>
+      <button v-if="canLink" class="btn ghost link-btn" type="button" @click="emit('link')">
+        <Link2 :size="16" /> Länka befintlig
+      </button>
       <button class="btn ghost" type="button" @click="emit('close')"><X :size="16" /> Avbryt</button>
       <button class="btn primary" type="submit" form="step-form" :disabled="!valid"><Save :size="16" /> Spara</button>
     </template>
