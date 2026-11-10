@@ -146,6 +146,7 @@ export class World {
         }
       }
       n.parentId = it.parentId
+      n.links = it.links ?? []
       n.level = it.level
       n.hue = it.hue
       n.r0 = this.radiusFor(it.level)
@@ -239,18 +240,22 @@ export class World {
 
     for (const n of nodes) {
       if (n.isRoot) continue
-      const p = this.map.get(n.parentId)
-      if (!p) continue
-      let dx = n.x - p.x
-      let dy = n.y - p.y
-      const d = Math.hypot(dx, dy) || 0.001
-      dx /= d
-      dy /= d
-      const f = kSpring * (d - (p.r0 + n.r0 + gap))
-      n.fx -= f * dx
-      n.fy -= f * dy
-      p.fx += f * dx
-      p.fy += f * dy
+      const ps = [n.parentId, ...(n.links ?? [])]
+      for (let k = 0; k < ps.length; k++) {
+        const p = this.map.get(ps[k])
+        if (!p) continue
+        let dx = n.x - p.x
+        let dy = n.y - p.y
+        const d = Math.hypot(dx, dy) || 0.001
+        dx /= d
+        dy /= d
+        const rest = p.r0 + n.r0 + gap * (k ? 2 : 1)
+        const f = kSpring * (k ? 0.5 : 1) * (d - rest)
+        n.fx -= f * dx
+        n.fy -= f * dy
+        p.fx += f * dx
+        p.fy += f * dy
+      }
     }
 
     for (let i = 0; i < nodes.length; i++) {

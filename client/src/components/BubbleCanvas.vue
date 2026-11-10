@@ -2,7 +2,7 @@
 import { ref, shallowRef, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ZoomIn, ZoomOut, Maximize } from 'lucide-vue-next'
 import { World, ROOT_ID, fitText } from '../physics.js'
-import { HUES, isVisible, percent, valueText } from '../tree.js'
+import { HUES, index, isVisible, percent, valueText } from '../tree.js'
 
 const props = defineProps({
   title: { type: String, default: '' },
@@ -81,34 +81,66 @@ function focusSet(id) {
   const n = world.map.get(id)
   if (!n || n.isRoot) return null
   const set = new Set([id])
-  for (let p = world.map.get(n.parentId); p; p = world.map.get(p.parentId)) set.add(p.id)
+  const up = [n]
+  while (up.length) {
+    const u = up.pop()
+    for (const pid of [u.parentId, ...(u.links ?? [])]) {
+      const p = world.map.get(pid)
+      if (p && !set.has(p.id)) {
+        set.add(p.id)
+        up.push(p)
+      }
+    }
+  }
   const kids = [id]
+  const seen = new Set()
   while (kids.length) {
     const k = kids.pop()
+    if (seen.has(k)) continue
+    seen.add(k)
     set.add(k)
-    for (const x of world.nodes) if (x.parentId === k) kids.push(x.id)
+    for (const x of world.nodes) if (x.parentId === k || x.links?.includes(k)) kids.push(x.id)
   }
   return set
 }
 
 function items() {
+  const ix = index(props.steps)
   const out = [{ id: ROOT_ID, parentId: null, level: 0, hue: 255, label: props.title, desc: '', extra: `${percent(props.steps)} %` }]
+  const byId = new Map([[ROOT_ID, out[0]]])
+  const links = []
   const walk = (list, parentId, level, hue) => {
     list.forEach((s, i) => {
-      if (!isVisible(s)) return
+      if (s.ref) {
+        const t = ix.get(s.ref)
+        if (t && isVisible(t, ix)) links.push([parentId, t.id])
+        return
+      }
+      if (!isVisible(s, ix)) return
       const h = level === 1 ? (s.color ?? HUES[i % HUES.length]) : hue
-      out.push({ id: s.id, parentId, level, hue: h, label: s.title, desc: s.description, extra: valueText(s), done: s.status === 'completed' })
+      const it = { id: s.id, parentId, level, hue: h, label: s.title, desc: s.description, extra: valueText(s), done: s.status === 'completed', links: [] }
+      byId.set(s.id, it)
+      out.push(it)
       walk(s.sub_steps ?? [], s.id, level + 1, h)
     })
   }
   walk(props.steps, ROOT_ID, 1, 0)
+  for (const [from, to] of links) {
+    const it = byId.get(to)
+    if (it && byId.has(from) && it.parentId !== from && !it.links.includes(from)) it.links.push(from)
+  }
   return out
 }
+
+const edges = shallowRef([])
 
 function rebuild() {
   const list = items()
   world.setTree(list)
   if (auto) fit()
+  edges.value = list.flatMap((it) =>
+    it.id === ROOT_ID ? [] : [it.parentId, ...it.links].map((p, k) => ({ key: `${it.id}>${p}`, from: p, to: it.id, link: k > 0 }))
+  )
   for (const it of list) {
     const n = world.map.get(it.id)
     const t = fitText(it.label, n.r0, it.extra)
@@ -135,14 +167,16 @@ function frame(now) {
     n.el.setAttribute('transform', `translate(${n.x.toFixed(1)} ${n.y.toFixed(1)}) scale(${a.toFixed(3)})`)
     n.el.style.opacity = Math.min(1, n.appear * 1.6) * n.focus
     n.body?.setAttribute('r', n.R.toFixed(2))
-    const p = n.line && world.map.get(n.parentId)
-    if (p) {
-      n.line.style.opacity = Math.min(n.focus, p.focus ?? 1)
-      n.line.setAttribute('x1', p.x.toFixed(1))
-      n.line.setAttribute('y1', p.y.toFixed(1))
-      n.line.setAttribute('x2', n.x.toFixed(1))
-      n.line.setAttribute('y2', n.y.toFixed(1))
-    }
+  }
+  for (const e of edges.value) {
+    const a = world.map.get(e.from)
+    const b = world.map.get(e.to)
+    if (!e.el || !a || !b) continue
+    e.el.style.opacity = Math.min(a.focus ?? 1, b.focus ?? 1) * Math.min(1, b.appear * 1.6)
+    e.el.setAttribute('x1', a.x.toFixed(1))
+    e.el.setAttribute('y1', a.y.toFixed(1))
+    e.el.setAttribute('x2', b.x.toFixed(1))
+    e.el.setAttribute('y2', b.y.toFixed(1))
   }
   raf = requestAnimationFrame(frame)
 }
@@ -366,7 +400,7 @@ onBeforeUnmount(() => {
   >
     <g class="world" :transform="`translate(${view.x} ${view.y}) scale(${view.k})`">
     <g class="edges">
-      <line v-for="n in views.filter((v) => !v.isRoot)" :key="n.id" :ref="(el) => (n.line = el)" class="edge" />
+      <line v-for="e in edges" :key="e.key" :ref="(el) => (e.el = el)" class="edge" :class="{ link: e.link }" />
     </g>
     <g class="bubbles">
       <g

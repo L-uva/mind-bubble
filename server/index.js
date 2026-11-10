@@ -13,8 +13,36 @@ const readConfig = () =>
   JSON.parse(readFileSync(join(here, existsSync(join(here, 'config.json')) ? 'config.json' : 'config.example.json'), 'utf8'))
 
 // Gives every node an id, a status and renumbers the top level steps.
-function normalizeSteps(list, { resetStatus = false, top = true } = {}) {
+// A link node ({ id, ref }) shares the bubble `ref` with another branch.
+function normalizeSteps(list, opts = {}) {
+  const ids = new Map()
+  const out = normalizeNodes(list, opts, ids)
+  return dropBadLinks(out, ids)
+}
+
+function dropBadLinks(list, ids, trail = new Set()) {
+  const out = []
+  for (const s of list) {
+    if (s.ref !== undefined) {
+      const to = ids.get(s.ref)
+      if (!to || trail.has(to)) continue
+      s.ref = to
+    } else if (s.sub_steps) {
+      s.sub_steps = dropBadLinks(s.sub_steps, ids, new Set([...trail, s.id]))
+      if (!s.sub_steps.length) delete s.sub_steps
+    }
+    out.push(s)
+  }
+  return out
+}
+
+function normalizeNodes(list, { resetStatus = false, top = true } = {}, ids) {
   return (list ?? []).map((s, i) => {
+    if (s.ref) {
+      const link = { id: resetStatus ? randomUUID() : s.id || randomUUID(), ref: String(s.ref) }
+      if (top) link.step_number = i + 1
+      return link
+    }
     const node = {
       id: resetStatus ? randomUUID() : s.id || randomUUID(),
       title: String(s.title ?? ''),
@@ -27,7 +55,8 @@ function normalizeSteps(list, { resetStatus = false, top = true } = {}) {
       node.color = Math.max(0, Math.min(360, Math.round(Number(s.color))))
     }
     if (s.unit) node.unit = s.unit
-    const subs = normalizeSteps(s.sub_steps, { resetStatus, top: false })
+    if (s.id) ids.set(s.id, node.id)
+    const subs = normalizeNodes(s.sub_steps, { resetStatus, top: false }, ids)
     if (subs.length) node.sub_steps = subs
     return node
   })
@@ -37,6 +66,7 @@ function countNodes(list) {
   let total = 0
   let done = 0
   for (const s of list) {
+    if (s.ref) continue
     total++
     if (s.status === 'completed') done++
     const c = countNodes(s.sub_steps ?? [])

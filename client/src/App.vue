@@ -1,8 +1,19 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, provide, onMounted, onBeforeUnmount } from 'vue'
 import { Sun, Moon, Library as LibraryIcon, X } from 'lucide-vue-next'
 import { api } from './api.js'
-import { ancestors, find, newId, pendingBelow, percent as calcPercent, stepHue } from './tree.js'
+import {
+  allAncestors,
+  find,
+  index,
+  linksTo,
+  newId,
+  pendingBelow,
+  percent as calcPercent,
+  reaches,
+  removeLinksTo,
+  stepHue
+} from './tree.js'
 import { ROOT_ID } from './physics.js'
 import { touchRecent } from './recent.js'
 import BubbleCanvas from './components/BubbleCanvas.vue'
@@ -11,6 +22,7 @@ import FabMenu from './components/FabMenu.vue'
 import NodeCard from './components/NodeCard.vue'
 import RootCard from './components/RootCard.vue'
 import StepForm from './components/StepForm.vue'
+import LinkPicker from './components/LinkPicker.vue'
 import TemplateForm from './components/TemplateForm.vue'
 import Library from './components/Library.vue'
 
@@ -24,11 +36,15 @@ const notice = ref('')
 const library = ref(false)
 const theme = ref(localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'))
 
+const ix = computed(() => index(doc.value?.steps))
+provide('ix', ix)
+
 const pct = computed(() => (doc.value ? calcPercent(doc.value.steps) : 0))
 const cardNode = computed(() => (card.value?.id && doc.value ? find(doc.value.steps, card.value.id) : null))
 
 function trail(list, target, acc) {
   for (const s of list) {
+    if (s.ref) continue
     if (s.id === target) return acc
     const r = trail(s.sub_steps ?? [], target, [...acc, s.title])
     if (r) return r
@@ -38,6 +54,64 @@ function trail(list, target, acc) {
 const cardPath = computed(() =>
   cardNode.value ? trail(doc.value.steps, card.value.id, [doc.value.project.title]) ?? [] : []
 )
+const shared = computed(() =>
+  cardNode.value
+    ? linksTo(doc.value.steps, card.value.id).map(({ link, parent }) => ({
+        refId: link.id,
+        parentTitle: parent ? parent.title : doc.value.project.title
+      }))
+    : []
+)
+
+function linkCandidates() {
+  const id = card.value?.id
+  const parent = !id || id === ROOT_ID ? null : ix.value.get(id)
+  const children = parent ? parent.sub_steps ?? [] : doc.value.steps
+  const taken = new Set(children.map((c) => c.ref ?? c.id))
+  const names = new Map()
+  const walk = (list, path) => {
+    for (const s of list) {
+      if (s.ref) continue
+      names.set(s.id, path)
+      walk(s.sub_steps ?? [], [...path, s.title])
+    }
+  }
+  walk(doc.value.steps, [doc.value.project.title])
+  return [...ix.value.values()]
+    .filter((t) => !taken.has(t.id) && !(parent && reaches(t, parent, ix.value)))
+    .map((t) => ({ id: t.id, title: t.title, path: names.get(t.id).join(' › ') }))
+}
+
+function addLink(targetId) {
+  const id = card.value.id
+  const link = { id: newId(), ref: targetId }
+  if (!id || id === ROOT_ID) doc.value.steps.push(link)
+  else {
+    const { node } = find(doc.value.steps, id)
+    node.sub_steps = [...(node.sub_steps ?? []), link]
+  }
+  card.value = null
+  save()
+}
+
+function unlink(refId) {
+  const walk = (list) => {
+    const i = list.findIndex((c) => c.id === refId)
+    if (i >= 0) {
+      list.splice(i, 1)
+      return true
+    }
+    return list.some((s) => {
+      if (!s.sub_steps || !walk(s.sub_steps)) return false
+      if (!s.sub_steps.length) delete s.sub_steps
+      return true
+    })
+  }
+  walk(doc.value.steps)
+  card.value = null
+  save()
+}
+
 const stepParentTitle = computed(() => {
   const id = card.value?.id
   return !id || id === ROOT_ID ? doc.value?.project.title : find(doc.value.steps, id)?.node.title
@@ -182,7 +256,7 @@ let noticeTimer
 function onPop(id) {
   const found = find(doc.value.steps, id)
   if (!found || found.node.status === 'completed') return
-  const left = pendingBelow(found.node)
+  const left = pendingBelow(found.node, ix.value)
   if (left) {
     notice.value = `Poppa de ${left} mindre bubblorna först`
     clearTimeout(noticeTimer)
@@ -231,7 +305,14 @@ function removeNode() {
   const { node, parent } = cardNode.value
   const list = parent ? parent.sub_steps : doc.value.steps
   canvas.value.playPop(node.id)
+  const owned = new Set()
+  const collect = (n) => {
+    owned.add(n.id)
+    for (const c of n.sub_steps ?? []) if (!c.ref) collect(c)
+  }
+  collect(node)
   list.splice(list.indexOf(node), 1)
+  removeLinksTo(doc.value.steps, owned)
   if (parent && !list.length) delete parent.sub_steps
   card.value = null
   save()
@@ -249,9 +330,9 @@ function editProject(data) {
 }
 
 function reopen(id) {
-  const chain = ancestors(doc.value.steps, id)
-  if (!chain) return
-  for (const n of [...chain, find(doc.value.steps, id).node]) n.status = 'pending'
+  const node = ix.value.get(id)
+  if (!node) return
+  for (const n of [...allAncestors(id, ix.value), node]) n.status = 'pending'
   save()
 }
 
@@ -349,6 +430,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :node="cardNode.node"
     :path="cardPath"
     :hue="cardNode.parent ? null : stepHue(doc.steps, cardNode.node)"
+    :ix="ix"
+    :shared="shared"
+    @unlink="unlink"
     @close="card = null"
     @done="popNode"
       @edit="editNode"
@@ -356,7 +440,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     @color="setColor"
     @reopen="reopen"
   />
-  <StepForm v-if="doc && card?.type === 'step'" :parent-title="stepParentTitle" @close="card = null" @save="addStep" />
+  <LinkPicker
+    v-if="doc && card?.type === 'link'"
+    :where="`Läggs under: ${stepParentTitle}`"
+    :candidates="linkCandidates()"
+    @close="card = null"
+    @pick="addLink"
+  />
+  <StepForm
+    v-if="doc && card?.type === 'step'"
+    can-link
+    :parent-title="stepParentTitle"
+    @close="card = null"
+    @save="addStep"
+    @link="card = { type: 'link', id: card.id }"
+  />
   <TemplateForm
     v-if="doc && card?.type === 'template'"
     :doc="doc"

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { GripVertical, Trash2, ArrowUpToLine, ArrowDownToLine } from 'lucide-vue-next'
+import { GripVertical, Trash2, ArrowUpToLine, ArrowDownToLine, Link2 } from 'lucide-vue-next'
+import LinkPicker from './LinkPicker.vue'
 import { HUES } from '../tree.js'
 import {
   blankRow,
@@ -10,11 +11,13 @@ import {
   flatten,
   indent,
   isBlank,
+  linkRow,
   moveDown,
   moveTo,
   moveUp,
   normalize,
   outdent,
+  pruneLinks,
   removeBlock,
   toggleDone
 } from '../tableModel.js'
@@ -31,10 +34,12 @@ const rows = ref([])
 const root = ref({ title: '', description: '' })
 const menu = ref(null)
 const drag = ref(null)
+const picker = ref(null)
 let skipEmit = false
 
 function tidy() {
   normalize(rows.value)
+  pruneLinks(rows.value)
   ensureTail(rows.value)
 }
 
@@ -71,7 +76,7 @@ watch(
 )
 
 const percent = computed(() => {
-  const real = rows.value.filter((r) => r.title.trim())
+  const real = rows.value.filter((r) => !r.ref && r.title.trim())
   return real.length ? Math.round((real.filter((r) => r.done).length / real.length) * 100) : 0
 })
 
@@ -83,7 +88,8 @@ const view = computed(() => {
       top++
       hue = r.extra.color ?? HUES[top % HUES.length]
     }
-    return { r, i, hue, last: i === rows.value.length - 1 }
+    const t = r.ref ? rows.value.find((x) => x.id === r.ref) : null
+    return { r, i, hue, t, last: i === rows.value.length - 1 }
   })
 })
 
@@ -132,6 +138,12 @@ function onKey(e, r, col) {
   } else if (e.key === 'Enter') {
     e.preventDefault()
     focusNeighbor(r.id, col, 1)
+  } else if (r.ref && (e.key === 'Backspace' || e.key === 'Delete')) {
+    e.preventDefault()
+    const prev = ids.value[ids.value.indexOf(r.id) - 1]
+    removeBlock(rows.value, i)
+    tidy()
+    focusCell(prev, 'title')
   } else if (e.key === 'Backspace' && col === 'title' && !r.title && !r.description && sel[0] === 0) {
     e.preventDefault()
     if (r.depth > 1) return run(outdent)
@@ -151,7 +163,7 @@ function onRootKey(e, col) {
 }
 
 function toggle(r) {
-  toggleDone(rows.value, rows.value.indexOf(r))
+  toggleDone(rows.value, rows.value.indexOf(r.ref ? rows.value.find((x) => x.id === r.ref) : r))
 }
 
 function openMenu(e, r) {
@@ -175,11 +187,49 @@ function rowCancel() {
   clearTimeout(press)
 }
 
+function linkCandidates() {
+  const i = rows.value.findIndex((r) => r.id === picker.value.id)
+  const row = rows.value[i]
+  const chain = new Set()
+  let d = row.depth
+  for (let k = i - 1; k >= 0 && d > 1; k--) {
+    if (rows.value[k].depth < d) {
+      chain.add(rows.value[k].id)
+      d = rows.value[k].depth
+    }
+  }
+  const path = []
+  const out = []
+  for (const r of rows.value) {
+    path.length = r.depth - 1
+    if (r.ref) continue
+    path[r.depth - 1] = r.title.trim()
+    if (r.title.trim() && !chain.has(r.id) && r.id !== row.id) {
+      out.push({ id: r.id, title: r.title.trim(), path: path.slice(0, -1).join(' › ') || root.value.title })
+    }
+  }
+  return out
+}
+
+function pickLink(target) {
+  const i = rows.value.findIndex((r) => r.id === picker.value.id)
+  picker.value = null
+  if (i < 0) return
+  const fresh = linkRow(target, rows.value[i].depth)
+  rows.value.splice(blockEnd(rows.value, i), 0, fresh)
+  tidy()
+  focusCell(fresh.id)
+}
+
 function menuAction(kind) {
   const i = rows.value.findIndex((r) => r.id === menu.value.id)
   menu.value = null
   if (i < 0) return
   const row = rows.value[i]
+  if (kind === 'link') {
+    picker.value = { id: row.id }
+    return
+  }
   if (kind === 'delete') {
     removeBlock(rows.value, i)
     tidy()
@@ -288,13 +338,14 @@ onBeforeUnmount(() => {
       </div>
 
       <div
-        v-for="{ r, i, hue, last } in view"
+        v-for="{ r, i, hue, t, last } in view"
         :key="r.id"
         data-wrap
         class="trow"
         :class="{
           ghost: isBlank(r),
-          done: r.done,
+          done: t ? t.done : r.done,
+          linked: !!r.ref,
           dragging: drag && i >= drag.from && i < drag.end
         }"
         @contextmenu.prevent="openMenu($event, r)"
@@ -308,9 +359,20 @@ onBeforeUnmount(() => {
         </div>
         <div class="cell title">
           <span class="guides" :style="{ width: (r.depth - 1) * INDENT + 'px' }" />
-          <span v-if="!isBlank(r)" class="dot" :style="{ '--h': hue }" />
+          <Link2 v-if="r.ref" class="link-ico" :size="14" />
+          <span v-else-if="!isBlank(r)" class="dot" :style="{ '--h': hue }" />
           <span v-else class="dot ghost-dot" />
           <input
+            v-if="r.ref"
+            :value="t ? t.title : ''"
+            readonly
+            :data-row="r.id"
+            data-col="title"
+            title="Delad bubbla – redigera originalet"
+            @keydown="onKey($event, r, 'title')"
+          />
+          <input
+            v-else
             v-model="r.title"
             :data-row="r.id"
             data-col="title"
@@ -320,13 +382,14 @@ onBeforeUnmount(() => {
           />
         </div>
         <div class="cell">
-          <input v-model="r.description" :data-row="r.id" data-col="description" @keydown="onKey($event, r, 'description')" />
+          <input v-if="r.ref" :value="t ? t.description : ''" readonly :data-row="r.id" data-col="description" @keydown="onKey($event, r, 'description')" />
+          <input v-else v-model="r.description" :data-row="r.id" data-col="description" @keydown="onKey($event, r, 'description')" />
         </div>
         <div class="cell">
-          <span v-if="r.title.trim()" class="pill" :class="{ ok: r.done }">{{ r.done ? 'Klart' : 'Väntar' }}</span>
+          <span v-if="r.ref || r.title.trim()" class="pill" :class="{ ok: (t || r).done }">{{ (t || r).done ? 'Klart' : 'Väntar' }}</span>
         </div>
         <div class="cell center">
-          <input v-if="r.title.trim()" type="checkbox" tabindex="-1" :checked="r.done" @change="toggle(r)" />
+          <input v-if="r.ref || r.title.trim()" type="checkbox" tabindex="-1" :checked="(t || r).done" @change="toggle(r)" />
         </div>
       </div>
 
@@ -342,10 +405,19 @@ onBeforeUnmount(() => {
       handtaget · högerklicka för meny
     </p>
 
+    <LinkPicker
+      v-if="picker"
+      :where="`Läggs efter: ${rows.find((r) => r.id === picker.id)?.title || '…'}`"
+      :candidates="linkCandidates()"
+      @close="picker = null"
+      @pick="pickLink"
+    />
+
     <Teleport to="body">
       <div v-if="menu" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @pointerdown.stop>
         <button @click="menuAction('insert')"><ArrowUpToLine :size="15" /> Infoga rad</button>
         <button @click="menuAction('add')"><ArrowDownToLine :size="15" /> Lägg till rad</button>
+        <button @click="menuAction('link')"><Link2 :size="15" /> Länka befintlig…</button>
         <button class="danger" @click="menuAction('delete')"><Trash2 :size="15" /> Ta bort rad</button>
       </div>
     </Teleport>
