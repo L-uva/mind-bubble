@@ -1,14 +1,23 @@
 <script setup>
 import { ref, shallowRef, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ZoomIn, ZoomOut, Maximize } from 'lucide-vue-next'
 import { World, ROOT_ID, fitText } from '../physics.js'
 import { HUES, isVisible, percent, valueText } from '../tree.js'
 
 const props = defineProps({
   title: { type: String, default: '' },
   steps: { type: Array, default: () => [] },
-  adding: { type: Boolean, default: false }
+  adding: { type: Boolean, default: false },
+  layoutKey: { type: String, default: '' }
 })
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'pop'])
+
+const hover = ref(null)
+const view = ref({ k: 1, x: 0, y: 0 })
+let auto = true
+let focusId = null
+let lastSaved = ''
+const vw = () => window.innerWidth
 
 const svg = ref(null)
 const fx = ref(null)
@@ -18,13 +27,77 @@ let raf = 0
 let last = 0
 let down = null
 
+const storeKey = () => (props.layoutKey ? 'layout-' + props.layoutKey : '')
+
+function loadLayout() {
+  try {
+    world.saved = JSON.parse(localStorage.getItem(storeKey()) || 'null')
+  } catch {
+    world.saved = null
+  }
+}
+
+function saveLayout() {
+  const key = storeKey()
+  if (!key || world.nodes.length < 2) return
+  const s = JSON.stringify(world.snapshot())
+  if (s === lastSaved) return
+  lastSaved = s
+  try {
+    localStorage.setItem(key, s)
+  } catch {}
+}
+
+function fit() {
+  const W = world.w
+  const H = world.h
+  const k = Math.min(world.vw / W, world.vh / H, 1)
+  view.value = { k, x: (world.vw - W * k) / 2, y: (world.vh - H * k) / 2 }
+}
+
+function zoomAt(factor, cx, cy) {
+  const v = view.value
+  const k = Math.min(3, Math.max(0.25, v.k * factor))
+  const f = k / v.k
+  view.value = { k, x: cx - (cx - v.x) * f, y: cy - (cy - v.y) * f }
+  auto = false
+}
+
+function zoomBtn(factor) {
+  zoomAt(factor, world.vw / 2, world.vh / 2)
+}
+
+function refit() {
+  auto = true
+  fit()
+}
+
+function onWheel(e) {
+  const r = svg.value.getBoundingClientRect()
+  zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top)
+}
+
+function focusSet(id) {
+  const n = world.map.get(id)
+  if (!n || n.isRoot) return null
+  const set = new Set([id])
+  for (let p = world.map.get(n.parentId); p; p = world.map.get(p.parentId)) set.add(p.id)
+  const kids = [id]
+  while (kids.length) {
+    const k = kids.pop()
+    set.add(k)
+    for (const x of world.nodes) if (x.parentId === k) kids.push(x.id)
+  }
+  return set
+}
+
 function items() {
-  const out = [{ id: ROOT_ID, parentId: null, level: 0, hue: 255, label: props.title, extra: `${percent(props.steps)} %` }]
+  const out = [{ id: ROOT_ID, parentId: null, level: 0, hue: 255, label: props.title, desc: '', extra: `${percent(props.steps)} %` }]
   const walk = (list, parentId, level, hue) => {
     list.forEach((s, i) => {
       if (!isVisible(s)) return
       const h = level === 1 ? (s.color ?? HUES[i % HUES.length]) : hue
-      out.push({ id: s.id, parentId, level, hue: h, label: s.title, extra: valueText(s), done: s.status === 'completed' })
+      out.push({ id: s.id, parentId, level, hue: h, label: s.title, desc: s.description, extra: valueText(s), done: s.status === 'completed' })
       walk(s.sub_steps ?? [], s.id, level + 1, h)
     })
   }
@@ -35,6 +108,7 @@ function items() {
 function rebuild() {
   const list = items()
   world.setTree(list)
+  if (auto) fit()
   for (const it of list) {
     const n = world.map.get(it.id)
     const t = fitText(it.label, n.r0, it.extra)
@@ -42,6 +116,7 @@ function rebuild() {
     n.fs = t.fs
     n.hasExtra = t.hasExtra
     n.fullTitle = it.label
+    n.desc = it.desc
     n.done = !!it.done
   }
   views.value = world.nodes.slice()
@@ -52,14 +127,17 @@ function frame(now) {
   last = now
   world.step(dt / 2)
   world.step(dt / 2)
+  const fs = focusSet(focusId)
   for (const n of world.nodes) {
     if (!n.el) continue
+    n.focus = (n.focus ?? 1) + ((!fs || fs.has(n.id) ? 1 : 0.16) - (n.focus ?? 1)) * Math.min(1, dt * 10)
     const a = 0.5 + 0.5 * easeOutBack(n.appear)
     n.el.setAttribute('transform', `translate(${n.x.toFixed(1)} ${n.y.toFixed(1)}) scale(${a.toFixed(3)})`)
-    n.el.style.opacity = Math.min(1, n.appear * 1.6)
+    n.el.style.opacity = Math.min(1, n.appear * 1.6) * n.focus
     n.body?.setAttribute('r', n.R.toFixed(2))
     const p = n.line && world.map.get(n.parentId)
     if (p) {
+      n.line.style.opacity = Math.min(n.focus, p.focus ?? 1)
       n.line.setAttribute('x1', p.x.toFixed(1))
       n.line.setAttribute('y1', p.y.toFixed(1))
       n.line.setAttribute('x2', n.x.toFixed(1))
@@ -76,17 +154,33 @@ function easeOutBack(t) {
 
 function pointer(e) {
   const r = svg.value.getBoundingClientRect()
-  return { x: e.clientX - r.left, y: e.clientY - r.top }
+  const v = view.value
+  return { x: (e.clientX - r.left - v.x) / v.k, y: (e.clientY - r.top - v.y) / v.k }
+}
+
+let pan = null
+
+function onBgDown(e) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  pan = { x: e.clientX, y: e.clientY, vx: view.value.x, vy: view.value.y }
+  svg.value.setPointerCapture(e.pointerId)
 }
 
 function onDown(e, n) {
   if (e.pointerType === 'mouse' && e.button !== 0) return
+  hover.value = null
+  focusId = n.id
   const p = pointer(e)
   down = { n, x: p.x, y: p.y, ox: p.x - n.x, oy: p.y - n.y, moved: false }
   svg.value.setPointerCapture(e.pointerId)
 }
 
 function onMove(e) {
+  if (pan) {
+    view.value = { ...view.value, x: pan.vx + e.clientX - pan.x, y: pan.vy + e.clientY - pan.y }
+    auto = false
+    return
+  }
   if (!down) return
   const p = pointer(e)
   if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 5) {
@@ -96,11 +190,35 @@ function onMove(e) {
   if (down.moved) world.moveDrag(p.x - down.ox, p.y - down.oy)
 }
 
-function onUp() {
+function onUp(e) {
+  if (pan) {
+    pan = null
+    return
+  }
   if (!down) return
-  if (!down.moved) emit('select', down.n.id)
+  if (!down.moved) emit(props.adding || down.n.isRoot ? 'select' : 'pop', down.n.id)
   world.endDrag()
   down = null
+  if (!document.elementFromPoint(e.clientX, e.clientY)?.closest('.bubble')) focusId = null
+}
+
+function onEnter(e, n) {
+  if (!down) focusId = n.id
+  if (!down) hover.value = { n, x: e.clientX, y: e.clientY }
+}
+
+function onHoverMove(e) {
+  if (hover.value) hover.value = { ...hover.value, x: e.clientX, y: e.clientY }
+}
+
+function leave() {
+  hover.value = null
+  if (!down) focusId = null
+}
+
+function onContext(n) {
+  hover.value = null
+  emit('select', n.id)
 }
 
 function playPop(id) {
@@ -148,21 +266,29 @@ defineExpose({ playPop })
 watch(() => [props.title, props.steps], rebuild, { deep: true })
 
 let ro
+let saveTimer = 0
 onMounted(() => {
   const resize = () => {
     const r = svg.value.getBoundingClientRect()
     world.setSize(r.width, r.height)
     if (world.nodes.length) rebuild()
+    else if (auto) fit()
   }
+  loadLayout()
   ro = new ResizeObserver(resize)
   ro.observe(svg.value)
   resize()
   rebuild()
   last = performance.now()
   raf = requestAnimationFrame(frame)
+  saveTimer = setInterval(saveLayout, 4000)
+  window.addEventListener('pagehide', saveLayout)
 })
 
 onBeforeUnmount(() => {
+  saveLayout()
+  clearInterval(saveTimer)
+  window.removeEventListener('pagehide', saveLayout)
   cancelAnimationFrame(raf)
   ro?.disconnect()
 })
@@ -173,10 +299,13 @@ onBeforeUnmount(() => {
     ref="svg"
     class="canvas"
     :class="{ adding }"
+    @pointerdown.self="onBgDown"
+    @wheel.prevent="onWheel"
     @pointermove="onMove"
     @pointerup="onUp"
     @pointercancel="onUp"
   >
+    <g class="world" :transform="`translate(${view.x} ${view.y}) scale(${view.k})`">
     <g class="edges">
       <line v-for="n in views.filter((v) => !v.isRoot)" :key="n.id" :ref="(el) => (n.line = el)" class="edge" />
     </g>
@@ -189,8 +318,11 @@ onBeforeUnmount(() => {
         :class="{ root: n.isRoot, done: n.done }"
         :style="{ '--h': n.hue, '--lv': n.level }"
         @pointerdown="onDown($event, n)"
+        @pointerenter="onEnter($event, n)"
+        @pointermove="onHoverMove"
+        @pointerleave="leave"
+        @contextmenu.prevent="onContext(n)"
       >
-        <title>{{ n.fullTitle }}</title>
         <circle :ref="(el) => (n.body = el)" class="body" :r="n.r0" />
         <g class="labels" :font-size="n.fs">
           <text
@@ -206,5 +338,19 @@ onBeforeUnmount(() => {
       </g>
     </g>
     <g ref="fx" class="fx" />
+    </g>
   </svg>
+  <div class="zoom-ctl">
+    <button title="Zooma in" @click="zoomBtn(1.25)"><ZoomIn :size="18" /></button>
+    <button title="Zooma ut" @click="zoomBtn(0.8)"><ZoomOut :size="18" /></button>
+    <button title="Anpassa till fönstret" @click="refit"><Maximize :size="18" /></button>
+  </div>
+  <div
+    v-if="hover && (hover.n.desc || hover.n.fullTitle)"
+    class="tip"
+    :style="{ left: Math.min(hover.x + 16, vw() - 300) + 'px', top: hover.y + 18 + 'px' }"
+  >
+    <strong>{{ hover.n.fullTitle }}</strong>
+    <span v-if="hover.n.desc">{{ hover.n.desc }}</span>
+  </div>
 </template>

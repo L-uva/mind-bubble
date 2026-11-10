@@ -2,9 +2,11 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Sun, Moon, Library as LibraryIcon, X } from 'lucide-vue-next'
 import { api } from './api.js'
-import { ancestors, find, newId, percent as calcPercent, stepHue } from './tree.js'
+import { ancestors, find, newId, pendingBelow, percent as calcPercent, stepHue } from './tree.js'
 import { ROOT_ID } from './physics.js'
+import { touchRecent } from './recent.js'
 import BubbleCanvas from './components/BubbleCanvas.vue'
+import TableEditor from './components/TableEditor.vue'
 import FabMenu from './components/FabMenu.vue'
 import NodeCard from './components/NodeCard.vue'
 import RootCard from './components/RootCard.vue'
@@ -17,6 +19,8 @@ const config = ref({ machineTypes: [] })
 const canvas = ref(null)
 const card = ref(null) // { type: 'node' | 'root' | 'step' | 'template', id? }
 const adding = ref(false)
+const view = ref('bubbles')
+const notice = ref('')
 const library = ref(false)
 const theme = ref(localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'))
 
@@ -48,15 +52,103 @@ function toggleTheme() {
   applyTheme()
 }
 
-async function save() {
+const MAX_HISTORY = 10
+const undoStack = []
+const redoStack = []
+const history = ref({ undo: 0, redo: 0 })
+const revision = ref(0)
+let baseline = ''
+let saveTimer = 0
+
+const snap = () =>
+  JSON.stringify({ steps: doc.value.steps, title: doc.value.project.title, description: doc.value.project.description })
+
+function syncHistory() {
+  history.value = { undo: undoStack.length, redo: redoStack.length }
+}
+
+function resetHistory() {
+  undoStack.length = 0
+  redoStack.length = 0
+  baseline = snap()
+  syncHistory()
+}
+
+async function persist() {
   const res = await api.saveProject(doc.value.machine.number, doc.value)
   doc.value.project = { ...doc.value.project, ...res.project }
 }
 
+async function save() {
+  clearTimeout(saveTimer)
+  saveTimer = 0
+  if (!doc.value) return
+  const cur = snap()
+  if (cur === baseline) return
+  undoStack.push(baseline)
+  if (undoStack.length > MAX_HISTORY) undoStack.shift()
+  redoStack.length = 0
+  baseline = cur
+  syncHistory()
+  await persist()
+}
+
+function saveSoon(ms) {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(save, ms)
+}
+
+async function flush() {
+  if (saveTimer) await save()
+}
+
+function restore(state) {
+  const s = JSON.parse(state)
+  doc.value.steps = s.steps
+  doc.value.project.title = s.title
+  doc.value.project.description = s.description
+  baseline = state
+  card.value = null
+  adding.value = false
+  revision.value++
+  syncHistory()
+  return persist()
+}
+
+async function undo() {
+  await flush()
+  if (!undoStack.length) return
+  redoStack.push(baseline)
+  await restore(undoStack.pop())
+}
+
+async function redo() {
+  await flush()
+  if (!redoStack.length) return
+  undoStack.push(baseline)
+  await restore(redoStack.pop())
+}
+
+function onTableChange(p) {
+  doc.value.steps = p.steps
+  doc.value.project.title = p.title ?? doc.value.project.title
+  doc.value.project.description = p.description
+  saveSoon(600)
+}
+
+function setView(name) {
+  card.value = null
+  adding.value = false
+  view.value = name
+}
+
 async function openProject(number) {
+  await flush()
   try {
     doc.value = await api.project(number)
     localStorage.setItem('project', String(number))
+    touchRecent(number)
+    resetHistory()
   } catch {
     doc.value = null
     localStorage.removeItem('project')
@@ -75,12 +167,29 @@ function onSelect(id) {
   card.value = id === ROOT_ID ? { type: 'root' } : { type: 'node', id }
 }
 
-function popNode() {
-  const { node } = cardNode.value
+function pop(node) {
   canvas.value.playPop(node.id)
   node.status = 'completed'
   card.value = null
   save()
+}
+
+function popNode() {
+  pop(cardNode.value.node)
+}
+
+let noticeTimer
+function onPop(id) {
+  const found = find(doc.value.steps, id)
+  if (!found || found.node.status === 'completed') return
+  const left = pendingBelow(found.node)
+  if (left) {
+    notice.value = `Poppa de ${left} mindre bubblorna först`
+    clearTimeout(noticeTimer)
+    noticeTimer = setTimeout(() => (notice.value = ''), 2200)
+    return
+  }
+  pop(found.node)
 }
 
 function addStep(data) {
@@ -128,11 +237,9 @@ function removeNode() {
   save()
 }
 
-let colorTimer
 function setColor(hue) {
   cardNode.value.node.color = hue
-  clearTimeout(colorTimer)
-  colorTimer = setTimeout(save, 400)
+  saveSoon(400)
 }
 
 function editProject(data) {
@@ -149,17 +256,20 @@ function reopen(id) {
 }
 
 function startAdding() {
-  if (!doc.value) return
+  if (!doc.value || view.value !== 'bubbles') return
   card.value = null
   library.value = false
   adding.value = true
 }
 
 function onKey(e) {
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a') {
-    if (e.target.closest?.('input, textarea, select')) return
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const k = e.key.toLowerCase()
+    if (!['a', 'z', 'y'].includes(k) || e.target.closest?.('input, textarea, select')) return
     e.preventDefault()
-    startAdding()
+    if (k === 'a' && !e.shiftKey) startAdding()
+    else if (k === 'y' || (k === 'z' && e.shiftKey)) redo()
+    else if (k === 'z') undo()
     return
   }
   if (e.key !== 'Escape') return
@@ -184,13 +294,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 <template>
   <BubbleCanvas
-    v-if="doc"
+    v-if="doc && view === 'bubbles'"
     ref="canvas"
+    :key="doc.machine.number"
+    :layout-key="String(doc.machine.number)"
     :title="doc.project.title"
     :steps="doc.steps"
     :adding="adding"
     @select="onSelect"
+    @pop="onPop"
   />
+  <TableEditor v-else-if="doc" :key="doc.machine.number" :doc="doc" :revision="revision" @change="onTableChange" />
   <div v-else class="empty-state">
     <h1>Mind Bubble</h1>
     <p class="muted">Inget projekt öppet.</p>
@@ -204,13 +318,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   </button>
 
   <Transition name="banner">
+    <div v-if="notice" class="banner warn-banner">{{ notice }}</div>
+  </Transition>
+
+  <Transition name="banner">
     <div v-if="adding" class="banner">
       Välj bubblan som ska få ett nytt steg
       <button class="icon-btn" @click="adding = false"><X :size="16" /></button>
     </div>
   </Transition>
 
-  <FabMenu :disabled="!doc" @add-step="startAdding" @save-template="card = { type: 'template' }" @library="library = true" />
+  <FabMenu
+    :disabled="!doc"
+    :view="view"
+    :can-undo="history.undo > 0"
+    :can-redo="history.redo > 0"
+    :current="doc?.machine.number"
+    @add-step="startAdding"
+    @save-template="card = { type: 'template' }"
+    @library="library = true"
+    @view="setView"
+    @undo="undo"
+    @redo="redo"
+    @open="openProject"
+  />
 
   <RootCard v-if="doc && card?.type === 'root'" :doc="doc" :percent="pct"   @close="card = null" @reopen="reopen" @edit="editProject" />
   <NodeCard

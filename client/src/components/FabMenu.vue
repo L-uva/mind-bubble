@@ -1,14 +1,54 @@
 <script setup>
-import { ref } from 'vue'
-import { Menu, X, Plus, BookmarkPlus, Library } from 'lucide-vue-next'
+import { ref, watch } from 'vue'
+import {
+  Menu,
+  X,
+  Plus,
+  BookmarkPlus,
+  Library,
+  Undo2,
+  Redo2,
+  Table2,
+  CircleDot,
+  History,
+  ChevronLeft,
+  Check
+} from 'lucide-vue-next'
+import { api } from '../api.js'
+import { getRecent } from '../recent.js'
 
-defineProps({ disabled: Boolean })
-const emit = defineEmits(['add-step', 'save-template', 'library'])
+const props = defineProps({
+  disabled: Boolean,
+  view: { type: String, default: 'bubbles' },
+  canUndo: Boolean,
+  canRedo: Boolean,
+  current: { type: Number, default: null }
+})
+const emit = defineEmits(['add-step', 'save-template', 'library', 'view', 'undo', 'redo', 'open'])
 const open = ref(false)
+const recent = ref([])
 
-function pick(name) {
+watch(open, async (v) => {
+  if (!v) return
+  try {
+    const all = await api.projects()
+    const order = getRecent()
+    const rank = (p) => {
+      const k = order.indexOf(p.machine_number)
+      return k < 0 ? 99 : k
+    }
+    recent.value = all
+      .filter((p) => order.includes(p.machine_number))
+      .sort((a, b) => rank(a) - rank(b))
+      .slice(0, 5)
+  } catch {
+    recent.value = []
+  }
+})
+
+function pick(name, ...args) {
   open.value = false
-  emit(name)
+  emit(name, ...args)
 }
 </script>
 
@@ -16,7 +56,30 @@ function pick(name) {
   <div class="fab-wrap">
     <Transition name="menu">
       <div v-if="open" class="fab-menu">
-        <button :disabled="disabled" @click="pick('add-step')"><Plus :size="18" /> Lägg till steg <kbd>Ctrl+A</kbd></button>
+        <button :disabled="view === 'bubbles'" @click="pick('view', 'bubbles')">
+          <CircleDot :size="18" /> Mind Bubble <Check v-if="view === 'bubbles'" :size="15" class="end" />
+        </button>
+        <button :disabled="view === 'table' || disabled" @click="pick('view', 'table')">
+          <Table2 :size="18" /> Tabeleditor <Check v-if="view === 'table'" :size="15" class="end" />
+        </button>
+        <hr />
+        <button :disabled="disabled || view !== 'bubbles'" @click="pick('add-step')">
+          <Plus :size="18" /> Lägg till steg <kbd>Ctrl+A</kbd>
+        </button>
+        <button :disabled="!canUndo" @click="pick('undo')"><Undo2 :size="18" /> Ångra <kbd>Ctrl+Z</kbd></button>
+        <button :disabled="!canRedo" @click="pick('redo')"><Redo2 :size="18" /> Gör om <kbd>Ctrl+Y</kbd></button>
+        <hr />
+        <div class="has-sub">
+          <button><History :size="18" /> Senast använda <ChevronLeft :size="15" class="end" /></button>
+          <div class="submenu">
+            <p v-if="!recent.length" class="muted">Inget ännu</p>
+            <button v-for="p in recent" :key="p.machine_number" @click="pick('open', p.machine_number)">
+              <span class="rtitle">{{ p.title }}</span>
+              <span class="muted">{{ p.machine_type }} · {{ p.machine_number }}</span>
+              <Check v-if="p.machine_number === current" :size="14" class="end" />
+            </button>
+          </div>
+        </div>
         <button :disabled="disabled" @click="pick('save-template')"><BookmarkPlus :size="18" /> Spara som mall</button>
         <button @click="pick('library')"><Library :size="18" /> Bibliotek</button>
       </div>

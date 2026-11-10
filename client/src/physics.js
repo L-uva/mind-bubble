@@ -36,6 +36,9 @@ export class World {
     this.map = new Map()
     this.w = 800
     this.h = 600
+    this.vw = 800
+    this.vh = 600
+    this.saved = null
     this.s = 1
     this.time = 0
     this.drag = null
@@ -46,20 +49,49 @@ export class World {
   }
 
   setSize(w, h) {
+    this.vw = w
+    this.vh = h
+    this.s = clamp(Math.min(w, h) / 820, 0.8, 1.25)
+    for (const n of this.nodes) n.r0 = this.radiusFor(n.level)
+    this.setBounds(this.nodes)
+  }
+
+  // The world grows beyond the viewport when there are too many bubbles to fit without crowding.
+  setBounds(items) {
+    let need = 0
+    for (const n of items) {
+      const r = this.radiusFor(n.level) + 16 * this.s
+      need += Math.PI * r * r
+    }
+    const f = Math.max(1, Math.sqrt((need * 2) / (this.vw * this.vh)))
+    const w = this.vw * f
+    const h = this.vh * f
+    const dx = (w - this.w) / 2
+    const dy = (h - this.h) / 2
+    for (const n of this.nodes) if (!n.isRoot) {
+      n.x += dx
+      n.y += dy
+    }
     this.w = w
     this.h = h
-    this.s = clamp(Math.min(w, h) / 820, 0.8, 1.25)
     const root = this.map.get(ROOT_ID)
     if (root) {
       root.x = w / 2
       root.y = h / 2
     }
-    for (const n of this.nodes) n.r0 = this.radiusFor(n.level)
+  }
+
+  snapshot() {
+    const root = this.map.get(ROOT_ID)
+    const out = {}
+    if (root) for (const n of this.nodes) if (!n.isRoot) out[n.id] = [Math.round(n.x - root.x), Math.round(n.y - root.y)]
+    return out
   }
 
   // items: [{ id, parentId, level, hue }] in depth-first order, root first.
   setTree(items) {
     const fresh = this.nodes.length <= 1
+    this.setBounds(items)
     const seen = new Set()
     for (const it of items) {
       let n = this.map.get(it.id)
@@ -86,9 +118,14 @@ export class World {
         }
         this.map.set(n.id, n)
         this.nodes.push(n)
+        const sv = this.saved?.[it.id]
         if (n.isRoot) {
           n.appear = 1
           n.fixed = true
+        } else if (sv) {
+          const root = this.map.get(ROOT_ID)
+          n.x = root.x + sv[0]
+          n.y = root.y + sv[1]
         } else if (!fresh) {
           const p = this.map.get(it.parentId)
           const root = this.map.get(ROOT_ID)
@@ -149,6 +186,11 @@ export class World {
         k.x = parent.x + Math.cos(ang) * dist
         k.y = parent.y + Math.sin(ang) * dist
         k.vx = k.vy = 0
+        const sv = this.saved?.[k.id]
+        if (sv) {
+          k.x = root.x + sv[0]
+          k.y = root.y + sv[1]
+        }
         const cs = clamp(span, 1.1, 2.4)
         place(k, ang - cs / 2, ang + cs / 2)
         a += span
@@ -267,8 +309,9 @@ export class World {
     }
 
     const dragId = this.drag && this.drag.id
+    const pad = 3 * s
     const inv = (n) => (n.fixed ? 0 : 1 / (n.m * (n.id === dragId ? 12 : 1)))
-    for (let it = 0; it < 3; it++) {
+    for (let it = 0; it < 5; it++) {
       for (let i = 0; i < nodes.length; i++) {
         const a = nodes[i]
         for (let j = i + 1; j < nodes.length; j++) {
@@ -276,7 +319,7 @@ export class World {
           let dx = b.x - a.x
           let dy = b.y - a.y
           const d = Math.hypot(dx, dy)
-          const minD = a.R + b.R
+          const minD = a.R + b.R + pad
           if (d >= minD) continue
           if (d < 0.0001) {
             dx = 1
