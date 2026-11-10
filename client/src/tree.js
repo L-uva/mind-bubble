@@ -23,16 +23,16 @@ export function index(steps) {
   return ix
 }
 
-// Real children of a node, with links resolved.
-export function kids(s, ix) {
-  return (s.sub_steps ?? []).map((c) => (isRef(c) ? ix.get(c.ref) : c)).filter(Boolean)
+// Children of a node. Links are only followed when withLinks is set (cycle checks); popping only counts own children.
+export function kids(s, ix, withLinks = false) {
+  return (s.sub_steps ?? []).filter((c) => withLinks || !isRef(c)).map((c) => (isRef(c) ? ix.get(c.ref) : c)).filter(Boolean)
 }
 
-export function subtree(s, ix, seen = new Set()) {
-  for (const c of kids(s, ix)) {
+export function subtree(s, ix, withLinks = false, seen = new Set()) {
+  for (const c of kids(s, ix, withLinks)) {
     if (seen.has(c.id)) continue
     seen.add(c.id)
-    subtree(c, ix, seen)
+    subtree(c, ix, withLinks, seen)
   }
   return [...seen].map((id) => ix.get(id))
 }
@@ -67,7 +67,7 @@ export function pendingBelow(s, ix) {
 
 // True if `to` can be reached from `from` by walking down (links included).
 export function reaches(from, to, ix) {
-  return from.id === to.id || subtree(from, ix).some((c) => c.id === to.id)
+  return from.id === to.id || subtree(from, ix, true).some((c) => c.id === to.id)
 }
 
 // Every real node above `id`, following all parent links.
