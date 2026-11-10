@@ -10,7 +10,7 @@ const props = defineProps({
   adding: { type: Boolean, default: false },
   layoutKey: { type: String, default: '' }
 })
-const emit = defineEmits(['select', 'pop'])
+const emit = defineEmits(['select', 'pop', 'link'])
 
 const hover = ref(null)
 const view = ref({ k: 1, x: 0, y: 0 })
@@ -192,6 +192,7 @@ function pointer(e) {
   return { x: (e.clientX - r.left - v.x) / v.k, y: (e.clientY - r.top - v.y) / v.k }
 }
 
+const linkLine = ref(null)
 let pan = null
 let pinch = null
 let press = 0
@@ -245,7 +246,7 @@ function onDown(e, n) {
   hover.value = null
   focusId = n.id
   const p = pointer(e)
-  down = { n, x: p.x, y: p.y, ox: p.x - n.x, oy: p.y - n.y, moved: false, long: false, touch: e.pointerType !== 'mouse' }
+  down = { n, x: p.x, y: p.y, ox: p.x - n.x, oy: p.y - n.y, moved: false, long: false, touch: e.pointerType !== 'mouse', linking: (e.ctrlKey || e.metaKey) && !n.isRoot && e.pointerType === 'mouse' }
   if (down.touch) {
     const d = down
     const { clientX: cx, clientY: cy } = e
@@ -272,9 +273,10 @@ function onMove(e) {
   if (!down.moved && Math.hypot(p.x - down.x, p.y - down.y) > 5) {
     down.moved = true
     clearTimeout(press)
-    if (!down.n.isRoot) world.startDrag(down.n.id, p.x - down.ox, p.y - down.oy)
+    if (!down.n.isRoot && !down.linking) world.startDrag(down.n.id, p.x - down.ox, p.y - down.oy)
   }
-  if (down.moved) world.moveDrag(p.x - down.ox, p.y - down.oy)
+  if (down.linking) linkLine.value = down.moved ? { x1: down.n.x, y1: down.n.y, x2: p.x, y2: p.y } : null
+  else if (down.moved) world.moveDrag(p.x - down.ox, p.y - down.oy)
 }
 
 function onUp(e) {
@@ -284,7 +286,11 @@ function onUp(e) {
     return
   }
   if (!down) return
-  if (!down.moved && !down.long) emit(props.adding || down.n.isRoot ? 'select' : 'pop', down.n.id)
+  if (down.linking) {
+    const to = document.elementFromPoint(e.clientX, e.clientY)?.closest('.bubble')?.dataset.id
+    if (down.moved && to && to !== down.n.id) emit('link', to, down.n.id)
+    linkLine.value = null
+  } else if (!down.moved && !down.long) emit(props.adding || down.n.isRoot ? 'select' : 'pop', down.n.id)
   world.endDrag()
   const touch = down.touch
   down = null
@@ -402,12 +408,14 @@ onBeforeUnmount(() => {
     <g class="edges">
       <line v-for="e in edges" :key="e.key" :ref="(el) => (e.el = el)" class="edge" :class="{ link: e.link }" />
     </g>
+    <line v-if="linkLine" class="edge link-drag" :x1="linkLine.x1" :y1="linkLine.y1" :x2="linkLine.x2" :y2="linkLine.y2" />
     <g class="bubbles">
       <g
         v-for="n in views"
         :key="n.id"
         :ref="(el) => (n.el = el)"
         class="bubble"
+        :data-id="n.id"
         :class="{ root: n.isRoot, done: n.done }"
         :style="{ '--h': n.hue, '--lv': n.level }"
         @pointerdown="onDown($event, n)"

@@ -84,13 +84,27 @@ function linkCandidates() {
 
 function addLink(targetId) {
   const id = card.value.id
+  card.value = null
+  linkUnder(id, targetId)
+}
+
+function dragLink(parentId, targetId) {
+  const parent = parentId === ROOT_ID ? null : ix.value.get(parentId)
+  const target = ix.value.get(targetId)
+  if (!target || (parentId !== ROOT_ID && !parent)) return
+  const kidsOf = parent ? parent.sub_steps ?? [] : doc.value.steps
+  if (kidsOf.some((c) => (c.ref ?? c.id) === targetId)) return flash('Redan länkad hit')
+  if (parent && reaches(target, parent, ix.value)) return flash('Skulle bli en cirkel')
+  linkUnder(parentId, targetId)
+}
+
+function linkUnder(id, targetId) {
   const link = { id: newId(), ref: targetId }
   if (!id || id === ROOT_ID) doc.value.steps.push(link)
   else {
     const { node } = find(doc.value.steps, id)
     node.sub_steps = [...(node.sub_steps ?? []), link]
   }
-  card.value = null
   save()
 }
 
@@ -253,14 +267,17 @@ function popNode() {
 }
 
 let noticeTimer
+function flash(msg) {
+  notice.value = msg
+  clearTimeout(noticeTimer)
+  noticeTimer = setTimeout(() => (notice.value = ''), 2200)
+}
 function onPop(id) {
   const found = find(doc.value.steps, id)
   if (!found || found.node.status === 'completed') return
   const left = pendingBelow(found.node, ix.value)
   if (left) {
-    notice.value = `Poppa de ${left} mindre bubblorna först`
-    clearTimeout(noticeTimer)
-    noticeTimer = setTimeout(() => (notice.value = ''), 2200)
+    flash(`Poppa de ${left} mindre bubblorna först`)
     return
   }
   pop(found.node)
@@ -346,7 +363,8 @@ function startAdding() {
 function onKey(e) {
   if ((e.ctrlKey || e.metaKey) && !e.altKey) {
     const k = e.key.toLowerCase()
-    if (!['a', 'z', 'y'].includes(k) || e.target.closest?.('input, textarea, select')) return
+    if (!['a', 'z', 'y'].includes(k)) return
+    if (e.target.closest?.('input, textarea, select') && (view.value === 'bubbles' || k === 'a')) return
     e.preventDefault()
     if (k === 'a' && !e.shiftKey) startAdding()
     else if (k === 'y' || (k === 'z' && e.shiftKey)) redo()
@@ -384,6 +402,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :adding="adding"
     @select="onSelect"
     @pop="onPop"
+    @link="dragLink"
   />
   <TableEditor v-else-if="doc" :key="doc.machine.number" :doc="doc" :revision="revision" @change="onTableChange" />
   <div v-else class="empty-state">

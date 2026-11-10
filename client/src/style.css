@@ -80,6 +80,11 @@ p {
   stroke-linecap: round;
 }
 
+.edge.link-drag {
+  stroke-dasharray: 6 6;
+  pointer-events: none;
+}
+
 .bubble {
   opacity: 0;
   cursor: grab;
