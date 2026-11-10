@@ -34,7 +34,7 @@ const adding = ref(false)
 const view = ref('bubbles')
 const notice = ref('')
 const library = ref(false)
-const settings = ref({ spacing: 22, live: true, ...JSON.parse(localStorage.getItem('settings') || '{}') })
+const settings = ref({ spacing: 22, live: true, cluster: 0, ...JSON.parse(localStorage.getItem('settings') || '{}') })
 function updateSettings(p) {
   settings.value = { ...settings.value, ...p }
   localStorage.setItem('settings', JSON.stringify(settings.value))
@@ -407,6 +407,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :adding="adding"
     :spacing="settings.spacing"
     :live="settings.live"
+    :cluster="settings.cluster"
     @select="onSelect"
     @pop="onPop"
     @link="dragLink"

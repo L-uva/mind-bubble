@@ -42,6 +42,8 @@ export class World {
     this.s = 1
     this.spacing = 22
     this.live = true
+    this.cluster = 0
+    this.awake = 0
     this.time = 0
     this.drag = null
   }
@@ -202,6 +204,10 @@ export class World {
     place(root, -Math.PI / 2, -Math.PI / 2 + TAU)
   }
 
+  wake() {
+    this.awake = this.time + 5
+  }
+
   startDrag(id, tx, ty) {
     const n = this.map.get(id)
     if (!n || n.fixed) return
@@ -230,6 +236,7 @@ export class World {
     const kRep = 260
     const damp = Math.exp((this.live ? -2.3 : -7) * dt)
     const e = 0.82
+    const cl = this.cluster
     const wander = this.live ? 38 : 0
 
     for (const n of nodes) {
@@ -252,8 +259,8 @@ export class World {
         const d = Math.hypot(dx, dy) || 0.001
         dx /= d
         dy /= d
-        const rest = p.r0 + n.r0 + gap * (k ? 2 : 1)
-        const f = kSpring * (k ? 0.5 : 1) * (d - rest)
+        const rest = p.r0 + n.r0 + gap * (k ? 2 : 1 - 0.25 * cl)
+        const f = kSpring * (k ? 0.5 : 1 + 0.8 * cl) * (d - rest)
         n.fx -= f * dx
         n.fy -= f * dy
         p.fx += f * dx
@@ -268,12 +275,15 @@ export class World {
         let dx = b.x - a.x
         let dy = b.y - a.y
         const d = Math.hypot(dx, dy) || 0.001
+        const sib = a.parentId === b.parentId
+        const far = cl && !sib && a.parentId !== b.id && b.parentId !== a.id
+        const rng = far ? range * (1 + 1.2 * cl) : range
         const g = d - a.R - b.R
-        if (g >= range) continue
+        if (g >= rng) continue
         dx /= d
         dy /= d
-        const k = 1 - Math.max(0, g) / range
-        const f = kRep * k * k
+        const k = 1 - Math.max(0, g) / rng
+        const f = kRep * k * k * (far ? 1 + 1.5 * cl : sib && cl ? Math.max(0.4, 1 - 0.3 * cl) : 1)
         a.fx -= f * dx
         a.fy -= f * dy
         b.fx += f * dx
@@ -307,7 +317,7 @@ export class World {
     for (const n of nodes) {
       if (n.fixed) continue
       const sp = Math.hypot(n.vx, n.vy)
-      if (!this.live && sp < 8 && this.drag?.id !== n.id) n.vx = n.vy = 0
+      if (!this.live && sp < 8 && t > this.awake && this.drag?.id !== n.id) n.vx = n.vy = 0
       const max = this.drag && this.drag.id === n.id ? 1800 : 700
       if (sp > max) {
         n.vx = (n.vx / sp) * max

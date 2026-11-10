@@ -10,7 +10,8 @@ const props = defineProps({
   adding: { type: Boolean, default: false },
   layoutKey: { type: String, default: '' },
   spacing: { type: Number, default: 22 },
-  live: { type: Boolean, default: true }
+  live: { type: Boolean, default: true },
+  cluster: { type: Number, default: 0 }
 })
 const emit = defineEmits(['select', 'pop', 'link'])
 
@@ -27,9 +28,12 @@ const views = shallowRef([])
 const world = new World()
 world.spacing = props.spacing
 world.live = props.live
-watch(() => [props.spacing, props.live], ([sp, lv]) => {
+world.cluster = props.cluster
+watch(() => [props.spacing, props.live, props.cluster], ([sp, lv, cl]) => {
   world.spacing = sp
   world.live = lv
+  world.cluster = cl
+  world.wake()
 })
 let raf = 0
 let last = 0

@@ -103,6 +103,21 @@ function pick(name, ...args) {
               <button class="switch" :class="{ on: settings.live }" role="switch" :aria-checked="!!settings.live" @click="emit('settings', { live: !settings.live })"><i /></button>
             </div>
             <div class="set-col">
+              <span>Gruppering</span>
+              <div class="seg" role="radiogroup">
+                <button
+                  v-for="(l, i) in ['Av', 'Lätt', 'Stark']"
+                  :key="i"
+                  :class="{ on: (settings.cluster || 0) === i }"
+                  role="radio"
+                  :aria-checked="(settings.cluster || 0) === i"
+                  @click="emit('settings', { cluster: i })"
+                >
+                  {{ l }}
+                </button>
+              </div>
+            </div>
+            <div class="set-col">
               <span>Avstånd <b>{{ settings.spacing }}</b></span>
               <input type="range" min="5" max="40" step="1" :value="settings.spacing" @input="emit('settings', { spacing: Number($event.target.value) })" />
             </div>

@@ -1312,3 +1312,42 @@ kbd {
 .switch.on i {
   transform: translateX(18px);
 }
+
+.seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.fab-menu .seg button {
+  justify-content: center;
+  padding: 6px 0;
+  border-radius: 9px;
+  font-size: 0.85rem;
+  color: var(--muted, #888);
+  transition: background 0.15s, color 0.15s;
+}
+
+.fab-menu .seg button.on,
+.fab-menu .seg button.on:hover:not(:disabled) {
+  background: #7c8cf0;
+  color: #fff;
+}
+
+.fab-menu .submenu button.switch {
+  flex-direction: row;
+  align-items: center;
+  width: 42px;
+  height: 24px;
+  padding: 3px;
+}
+
+.fab-menu .submenu .seg button {
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 0;
+  white-space: normal;
+}
