@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { db } from './db.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const PORT = 3123
+const PORT = Number(process.env.PORT) || 3123
 const today = () => new Date().toISOString().slice(0, 10)
 const readConfig = () =>
   JSON.parse(readFileSync(join(here, existsSync(join(here, 'config.json')) ? 'config.json' : 'config.example.json'), 'utf8'))
@@ -215,5 +215,11 @@ function seedExample() {
   }
 }
 seedExample()
+
+const clientDist = join(here, '..', 'client', 'dist')
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist))
+  app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(join(clientDist, 'index.html')))
+}
 
 app.listen(PORT, () => console.log(`Mind Bubble server: http://localhost:${PORT}`))

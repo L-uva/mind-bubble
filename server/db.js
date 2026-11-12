@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const dataDir = join(here, 'data')
+const dataDir = process.env.DATA_DIR || join(here, 'data')
 mkdirSync(dataDir, { recursive: true })
 
 export const db = new DatabaseSync(join(dataDir, 'mind-bubble.db'))
