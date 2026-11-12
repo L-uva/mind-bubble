@@ -12,11 +12,13 @@ import {
   CircleDot,
   History,
   Settings,
+  Palette,
   ChevronLeft,
   Check
 } from 'lucide-vue-next'
 import { api } from '../api.js'
 import { getRecent } from '../recent.js'
+import { HUES, PALETTES } from '../tree.js'
 
 const props = defineProps({
   disabled: Boolean,
@@ -31,6 +33,23 @@ const emit = defineEmits(['add-step', 'save-template', 'library', 'view', 'undo'
 const open = ref(false)
 const recent = ref([])
 const showSettings = ref(false)
+const showThemes = ref(false)
+
+const OFFSETS = {
+  pastel: HUES.slice(0, 4).map((h) => [h, 72, 82]),
+  pop: HUES.slice(0, 4).map((h) => [h, 92, 60])
+}
+
+function preview(id) {
+  const base = props.settings.baseHue ?? 255
+  const spec =
+    id === 'tonal'
+      ? [0, 30, -30, 60].map((o) => [base + o, 60, 80])
+      : id === 'complement'
+        ? [0, 180, 30, 210].map((o) => [base + o, 65, 78])
+        : OFFSETS[id]
+  return spec.map(([h, s, l]) => `hsl(${h} ${s}% ${l}%)`)
+}
 
 watch(open, (v) => {
   if (!v) showSettings.value = false
@@ -65,10 +84,10 @@ function pick(name, ...args) {
     <Transition name="menu">
       <div v-if="open" class="fab-menu">
         <button :disabled="view === 'bubbles'" @click="pick('view', 'bubbles')">
-          <CircleDot :size="18" /> Mind Bubble <Check v-if="view === 'bubbles'" :size="15" class="end" />
+          <CircleDot :size="18" /> Mind Bubble <kbd v-if="view !== 'bubbles'">F2</kbd><Check v-if="view === 'bubbles'" :size="15" class="end" />
         </button>
         <button :disabled="view === 'table' || disabled" @click="pick('view', 'table')">
-          <Table2 :size="18" /> Tabeleditor <Check v-if="view === 'table'" :size="15" class="end" />
+          <Table2 :size="18" /> Tabeleditor <kbd v-if="view !== 'table'">F2</kbd><Check v-if="view === 'table'" :size="15" class="end" />
         </button>
         <hr />
         <button :disabled="disabled || view !== 'bubbles'" @click="pick('add-step')">
@@ -94,6 +113,36 @@ function pick(name, ...args) {
         <div class="has-sub settings" :class="{ show: showSettings }">
           <button @click="showSettings = !showSettings"><Settings :size="18" /> Inställningar <ChevronLeft :size="15" class="end" /></button>
           <div class="submenu">
+            <div class="set-col">
+              <button class="theme-head" type="button" @click="showThemes = !showThemes">
+                <span><Palette :size="16" /> Färgtema</span>
+                <b>{{ PALETTES.find((p) => p.id === settings.palette)?.label }}</b>
+              </button>
+              <div v-if="showThemes" class="theme-opts">
+                <button
+                  v-for="p in PALETTES"
+                  :key="p.id"
+                  type="button"
+                  class="theme-opt"
+                  :class="{ on: settings.palette === p.id }"
+                  @click="emit('settings', { palette: p.id })"
+                >
+                  <span class="theme-dots"><i v-for="(c, i) in preview(p.id)" :key="i" :style="{ background: c }" /></span>
+                  {{ p.label }}
+                </button>
+              </div>
+              <template v-if="showThemes && PALETTES.find((p) => p.id === settings.palette)?.base">
+                <span class="muted">Kulör på första bubblan</span>
+                <input
+                  class="hue-slider"
+                  type="range"
+                  min="0"
+                  max="359"
+                  :value="settings.baseHue"
+                  @input="emit('settings', { baseHue: Number($event.target.value) })"
+                />
+              </template>
+            </div>
             <div class="set-row">
               <span>Mörkt läge</span>
               <button class="switch" :class="{ on: theme === 'dark' }" role="switch" :aria-checked="theme === 'dark'" @click="emit('theme')"><i /></button>

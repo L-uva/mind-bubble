@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { X, Plus, Trash2, ChevronLeft } from 'lucide-vue-next'
+import { X, Plus, Save, Trash2, ChevronLeft } from 'lucide-vue-next'
 import { api } from '../api.js'
 
 const props = defineProps({ current: Number, machineTypes: Array })
@@ -81,9 +81,9 @@ onMounted(load)
   <div class="overlay drawer-overlay" @pointerdown.self="emit('close')">
     <aside class="drawer">
       <header>
-        <button v-if="creating" class="icon-btn" @click="creating = false"><ChevronLeft :size="18" /></button>
+        <button v-if="creating" class="icon-btn" title="Tillbaka" @click="creating = false"><ChevronLeft :size="16" /></button>
         <h2>{{ creating ? 'Nytt projekt' : 'Bibliotek' }}</h2>
-        <button class="icon-btn" @click="emit('close')"><X :size="18" /></button>
+        <button class="icon-btn" title="Stäng" @click="emit('close')"><X :size="16" /></button>
       </header>
 
       <template v-if="!creating">
@@ -136,8 +136,8 @@ onMounted(load)
         <label>Beskrivning<textarea v-model="form.description" rows="3" /></label>
         <p v-if="error" class="error">{{ error }}</p>
         <div class="drawer-foot">
-          <button type="button" class="btn ghost" @click="creating = false">Avbryt</button>
-          <button type="submit" class="btn primary">Skapa</button>
+          <button type="button" class="btn ghost" @click="creating = false"><X :size="16" /> Avbryt</button>
+          <button type="submit" class="btn primary"><Save :size="16" /> Skapa</button>
         </div>
       </form>
     </aside>

@@ -24,28 +24,25 @@ function submit() {
 </script>
 
 <template>
-  <Card width="460px" @close="emit('close')">
-    <button v-if="!editing" class="icon-btn card-tools" title="Redigera" @click="startEdit"><Pencil :size="16" /></button>
+  <Card width="460px" :title="doc.project.title" :subtitle="`${doc.machine.type} · ${doc.machine.number}`" @close="emit('close')">
+    <template #tools>
+      <button v-if="!editing" class="icon-btn" title="Redigera" @click="startEdit"><Pencil :size="16" /></button>
+    </template>
     <form v-if="editing" id="root-edit" class="form" @submit.prevent="submit">
       <label>Titel *<input v-model="draft.title" required autofocus /></label>
       <label>Beskrivning<textarea v-model="draft.description" rows="3" /></label>
     </form>
     <template v-else>
       <div class="root-head">
-        <h2>{{ doc.project.title }}</h2>
         <div class="pct">{{ percent }} %</div>
         <div class="bar"><span :style="{ width: percent + '%' }" /></div>
-        <p class="muted">{{ doc.machine.type }} · {{ doc.machine.number }}</p>
       </div>
       <p v-if="doc.project.description" class="desc">{{ doc.project.description }}</p>
       <Checklist :items="doc.steps" @reopen="emit('reopen', $event)" />
     </template>
-    <template #actions>
-      <template v-if="editing">
-        <button class="btn ghost" type="button" @click="editing = false"><X :size="16" /> Avbryt</button>
-        <button class="btn primary" type="submit" form="root-edit" :disabled="!valid"><Save :size="16" /> Spara</button>
-      </template>
-      <button v-else class="btn ghost" @click="emit('close')"><X :size="16" /> Stäng</button>
+    <template v-if="editing" #actions>
+      <button class="btn ghost" type="button" @click="editing = false"><X :size="16" /> Avbryt</button>
+      <button class="btn primary" type="submit" form="root-edit" :disabled="!valid"><Save :size="16" /> Spara</button>
     </template>
   </Card>
 </template>

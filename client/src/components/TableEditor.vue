@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { GripVertical, Trash2, ArrowUpToLine, ArrowDownToLine, Link2 } from 'lucide-vue-next'
 import LinkPicker from './LinkPicker.vue'
-import { HUES } from '../tree.js'
+import { assignHues, rootHue } from '../tree.js'
 import {
   blankRow,
   blockEnd,
@@ -81,17 +81,19 @@ const percent = computed(() => {
 })
 
 const view = computed(() => {
-  let top = -1
-  let hue = HUES[0]
+  const hues = assignHues(
+    rows.value.filter((r) => r.depth === 1 && !r.ref && r.title.trim()).map((r) => ({ id: r.id, color: r.extra.color }))
+  )
   return rows.value.map((r, i) => {
-    if (r.depth === 1 && r.title.trim()) {
-      top++
-      hue = r.extra.color ?? HUES[top % HUES.length]
-    }
     const t = r.ref ? rows.value.find((x) => x.id === r.ref) : null
-    return { r, i, hue, t, last: i === rows.value.length - 1 }
+    return { r, i, hue: hues.get(r.id) ?? hues.get(topOf(i)), t, last: i === rows.value.length - 1 }
   })
 })
+
+function topOf(i) {
+  for (let k = i; k >= 0; k--) if (rows.value[k].depth === 1 && !rows.value[k].ref) return rows.value[k].id
+  return null
+}
 
 const ids = computed(() => ['root', ...rows.value.map((r) => r.id)])
 
@@ -144,7 +146,7 @@ function onKey(e, r, col) {
     removeBlock(rows.value, i)
     tidy()
     focusCell(prev, 'title')
-  } else if (e.key === 'Backspace' && col === 'title' && !r.title && !r.description && sel[0] === 0) {
+  } else if (e.key === 'Backspace' && col === 'title' && !r.title && !r.subtitle && !r.description && sel[0] === 0) {
     e.preventDefault()
     if (r.depth > 1) return run(outdent)
     const prev = ids.value[ids.value.indexOf(r.id) - 1]
@@ -306,7 +308,8 @@ onBeforeUnmount(() => {
     <div ref="tbl" class="tbl" @dragstart.prevent>
       <div class="trow thead">
         <div />
-        <div class="cell">Titel</div>
+        <div class="cell">Uppgift</div>
+        <div class="cell">Underrubrik</div>
         <div class="cell">Beskrivning</div>
         <div class="cell">Status</div>
         <div class="cell center">Poppa</div>
@@ -315,7 +318,7 @@ onBeforeUnmount(() => {
       <div class="trow root-row">
         <div />
         <div class="cell title">
-          <span class="dot root" />
+          <span class="dot root" :style="{ '--h': rootHue() }" />
           <input
             v-model="root.title"
             data-row="root"
@@ -324,6 +327,7 @@ onBeforeUnmount(() => {
             @keydown="onRootKey($event, 'title')"
           />
         </div>
+        <div class="cell" />
         <div class="cell">
           <input
             v-model="root.description"
@@ -376,10 +380,14 @@ onBeforeUnmount(() => {
             v-model="r.title"
             :data-row="r.id"
             data-col="title"
-            :class="{ missing: !r.title.trim() && r.description.trim() }"
-            :placeholder="last ? 'Skriv för att lägga till…' : r.description.trim() ? 'Titel saknas' : ''"
+            :class="{ missing: !r.title.trim() && (r.description.trim() || r.subtitle.trim()) }"
+            :placeholder="last ? 'Skriv för att lägga till…' : r.description.trim() || r.subtitle.trim() ? 'Uppgift saknas' : ''"
             @keydown="onKey($event, r, 'title')"
           />
+        </div>
+        <div class="cell">
+          <input v-if="r.ref" :value="t ? t.subtitle : ''" readonly :data-row="r.id" data-col="subtitle" @keydown="onKey($event, r, 'subtitle')" />
+          <input v-else v-model="r.subtitle" :data-row="r.id" data-col="subtitle" @keydown="onKey($event, r, 'subtitle')" />
         </div>
         <div class="cell">
           <input v-if="r.ref" :value="t ? t.description : ''" readonly :data-row="r.id" data-col="description" @keydown="onKey($event, r, 'description')" />

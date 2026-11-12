@@ -34,6 +34,18 @@
   --sheen: rgba(255, 255, 255, 0.4);
 }
 
+:root[data-palette='pop'] {
+  --bub-l0: 64%;
+  --bub-step: 2%;
+  --bub-s: 92%;
+}
+
+:root[data-theme='dark'][data-palette='pop'] {
+  --bub-l0: 48%;
+  --bub-step: -2%;
+  --bub-s: 78%;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -72,6 +84,19 @@ p {
   width: 100%;
   height: 100%;
   touch-action: none;
+  cursor: grab;
+}
+
+.canvas.panning,
+.canvas.panning *,
+.canvas.dragging,
+.canvas.dragging * {
+  cursor: grabbing !important;
+}
+
+.canvas.linking,
+.canvas.linking * {
+  cursor: crosshair !important;
 }
 
 .edge {
@@ -130,6 +155,24 @@ p {
 .labels text.extra {
   font-weight: 600;
   opacity: 0.7;
+}
+
+.labels text.sub {
+  font-size: 0.8em;
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.bubble.link-ok .body {
+  stroke: hsl(var(--green) 65% 42%);
+  stroke-width: 5;
+  filter: drop-shadow(0 0 10px hsl(var(--green) 65% 45%));
+}
+
+.bubble.link-bad .body {
+  stroke: #e5738f;
+  stroke-width: 3;
+  stroke-dasharray: 6 5;
 }
 
 .bubble.root .labels text.extra {
@@ -488,25 +531,37 @@ select:focus {
 
 .card header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
 }
 
 .card header .head-text {
   flex: 1;
   min-width: 0;
-  padding-right: 84px;
+}
+
+.head-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.sub-label {
+  font-weight: 600;
+}
+
+.group-label {
+  margin: 4px 0 -4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .card header h2 {
   font-size: 1.3rem;
   overflow-wrap: anywhere;
-}
-
-.card-tools {
-  position: absolute;
-  top: 18px;
-  right: 18px;
 }
 
 .card-body {
@@ -784,7 +839,7 @@ kbd {
 
 .trow {
   display: grid;
-  grid-template-columns: 34px minmax(220px, 1.3fr) minmax(220px, 2fr) 84px 64px;
+  grid-template-columns: 34px minmax(200px, 1.3fr) minmax(140px, 0.8fr) minmax(200px, 2fr) 84px 64px;
   align-items: stretch;
   min-height: 34px;
   border-bottom: 1px solid var(--border);
@@ -889,7 +944,6 @@ kbd {
   width: 12px;
   height: 12px;
   margin-left: 2px;
-  background: var(--accent);
 }
 
 .dot.ghost-dot {
@@ -1335,6 +1389,53 @@ kbd {
 .fab-menu .seg button.on:hover:not(:disabled) {
   background: #7c8cf0;
   color: #fff;
+}
+
+.fab-menu .submenu .theme-head {
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-radius: 8px;
+}
+
+.theme-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-opts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.fab-menu .submenu .theme-opt {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 0.85rem;
+}
+
+.fab-menu .submenu .theme-opt.on {
+  border-color: #7c8cf0;
+  box-shadow: 0 0 0 1px #7c8cf0;
+}
+
+.theme-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.theme-dots i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
 }
 
 .fab-menu .submenu button.switch {

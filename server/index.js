@@ -55,6 +55,7 @@ function normalizeNodes(list, { resetStatus = false, top = true } = {}, ids) {
       node.color = Math.max(0, Math.min(360, Math.round(Number(s.color))))
     }
     if (s.unit) node.unit = s.unit
+    if (s.subtitle && String(s.subtitle).trim()) node.subtitle = String(s.subtitle).trim()
     if (s.id) ids.set(s.id, node.id)
     const subs = normalizeNodes(s.sub_steps, { resetStatus, top: false }, ids)
     if (subs.length) node.sub_steps = subs

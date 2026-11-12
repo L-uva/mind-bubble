@@ -5,10 +5,10 @@ const rand = (a, b) => a + Math.random() * (b - a)
 export const ROOT_ID = 'root'
 
 // Wraps a label so it fits inside a bubble; the full text is always available in the cards.
-export function fitText(text, r, extra) {
+export function fitText(text, r, extra, sub) {
   const fs = clamp(r * 0.26, 9, 15)
   const maxChars = Math.max(3, Math.floor((r * 1.6) / (fs * 0.56)))
-  const maxLines = Math.max(1, Math.floor((r * 1.5) / (fs * 1.18)) - (extra ? 1 : 0))
+  const maxLines = Math.max(1, Math.floor((r * 1.5) / (fs * 1.18)) - (extra ? 1 : 0) - (sub ? 1 : 0))
   const lines = []
   let cur = ''
   for (let word of String(text || '').split(/\s+/).filter(Boolean)) {
@@ -26,8 +26,17 @@ export function fitText(text, r, extra) {
     const last = lines[maxLines - 1]
     lines[maxLines - 1] = (last.length >= maxChars ? last.slice(0, maxChars - 1) : last) + '…'
   }
-  if (extra) lines.push(extra.length > maxChars ? extra.slice(0, maxChars - 1) + '…' : extra)
-  return { lines, fs, hasExtra: !!extra }
+  const kinds = lines.map(() => 'title')
+  const short = (s) => (s.length > maxChars ? s.slice(0, maxChars - 1) + '…' : s)
+  if (sub) {
+    lines.push(short(sub))
+    kinds.push('sub')
+  }
+  if (extra) {
+    lines.push(short(extra))
+    kinds.push('extra')
+  }
+  return { lines, kinds, fs }
 }
 
 export class World {

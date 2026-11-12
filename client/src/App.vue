@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, provide, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, provide, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Library as LibraryIcon, X } from 'lucide-vue-next'
 import { api } from './api.js'
 import {
@@ -12,7 +12,8 @@ import {
   percent as calcPercent,
   reaches,
   removeLinksTo,
-  stepHue
+  stepHue,
+  colorScheme
 } from './tree.js'
 import { ROOT_ID } from './physics.js'
 import { touchRecent } from './recent.js'
@@ -34,7 +35,16 @@ const adding = ref(false)
 const view = ref('bubbles')
 const notice = ref('')
 const library = ref(false)
-const settings = ref({ spacing: 22, live: true, cluster: 0, ...JSON.parse(localStorage.getItem('settings') || '{}') })
+const settings = ref({ spacing: 22, live: true, cluster: 0, palette: 'pastel', baseHue: 255, ...JSON.parse(localStorage.getItem('settings') || '{}') })
+watch(
+  settings,
+  (s) => {
+    colorScheme.palette = s.palette
+    colorScheme.baseHue = s.baseHue
+    document.documentElement.dataset.palette = s.palette
+  },
+  { immediate: true }
+)
 function updateSettings(p) {
   settings.value = { ...settings.value, ...p }
   localStorage.setItem('settings', JSON.stringify(settings.value))
@@ -267,10 +277,6 @@ function pop(node) {
   save()
 }
 
-function popNode() {
-  pop(cardNode.value.node)
-}
-
 let noticeTimer
 function flash(msg) {
   notice.value = msg
@@ -280,11 +286,7 @@ function flash(msg) {
 function onPop(id) {
   const found = find(doc.value.steps, id)
   if (!found || found.node.status === 'completed') return
-  const left = pendingBelow(found.node, ix.value)
-  if (left) {
-    flash(`Poppa de ${left} mindre bubblorna först`)
-    return
-  }
+  if (pendingBelow(found.node, ix.value)) return
   pop(found.node)
 }
 
@@ -315,6 +317,8 @@ function onDeleted(number) {
 function editNode(data) {
   const { node } = cardNode.value
   node.title = data.title
+  if (data.subtitle === undefined) delete node.subtitle
+  else node.subtitle = data.subtitle
   node.description = data.description
   if (data.value === undefined) delete node.value
   else node.value = data.value
@@ -366,6 +370,11 @@ function startAdding() {
 }
 
 function onKey(e) {
+  if (doc.value && (e.key === 'F2' || ((e.ctrlKey || e.metaKey) && e.key === 'Tab'))) {
+    e.preventDefault()
+    setView(view.value === 'bubbles' ? 'table' : 'bubbles')
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && !e.altKey) {
     const k = e.key.toLowerCase()
     if (!['a', 'z', 'y'].includes(k)) return
@@ -460,8 +469,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     :shared="shared"
     @unlink="unlink"
     @close="card = null"
-    @done="popNode"
-      @edit="editNode"
+    @edit="editNode"
     @remove="removeNode"
     @color="setColor"
     @reopen="reopen"

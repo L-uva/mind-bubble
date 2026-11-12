@@ -1,6 +1,74 @@
-export const HUES = [205, 345, 150, 35, 265, 180, 95, 320]
+import { reactive } from 'vue'
 
-export const stepHue = (steps, node) => node.color ?? HUES[Math.max(0, steps.indexOf(node)) % HUES.length]
+export const ROOT_HUE = 255
+export const HUES = [205, 345, 150, 35, 180, 95, 320]
+
+export const PALETTES = [
+  { id: 'pastel', label: 'Pastell' },
+  { id: 'pop', label: 'Pop' },
+  { id: 'tonal', label: 'Toner', base: true },
+  { id: 'complement', label: 'Komplement', base: true }
+]
+
+// palette: how colors look and are picked. baseHue: the first bubble's hue for the palettes that build on it.
+export const colorScheme = reactive({ palette: 'pastel', baseHue: ROOT_HUE })
+
+const hueDist = (a, b) => {
+  const d = Math.abs(a - b) % 360
+  return Math.min(d, 360 - d)
+}
+const wrap = (h) => ((Math.round(h) % 360) + 360) % 360
+const golden = (from) => Array.from({ length: 240 }, (_, n) => wrap(n * 137.508 + from))
+const COMPLEMENT = [180, 30, 210, -30, 150, 60, 240, -60, 120, 90, 270, -90]
+const TONES = Array.from({ length: 9 }, (_, i) => (i + 2) * 15).flatMap((d) => [d, -d])
+
+export const usesBaseHue = () => !!PALETTES.find((p) => p.id === colorScheme.palette)?.base
+
+export const rootHue = () => (usesBaseHue() ? colorScheme.baseHue : ROOT_HUE)
+
+function huePool() {
+  const base = colorScheme.baseHue
+  if (colorScheme.palette === 'tonal') return [...TONES.map((o) => wrap(base + o)), ...golden(base)]
+  if (colorScheme.palette === 'complement') return [...COMPLEMENT.map((o) => wrap(base + o)), ...golden(base)]
+  return [...HUES, ...golden(20)]
+}
+
+// Gives every top-level bubble its own hue, never the root's. Stored colors win; the rest take the
+// first palette hue that is far enough from all hues in use (the gap shrinks only when the circle is full).
+export function assignHues(steps) {
+  const tops = (steps ?? []).filter((s) => !s.ref)
+  const root = rootHue()
+  const out = new Map()
+  const used = [root]
+  for (const s of tops) {
+    if (s.color === undefined || s.color === null || s.color === '' || !Number.isFinite(Number(s.color))) continue
+    out.set(s.id, Number(s.color))
+    used.push(Number(s.color))
+  }
+  const pool = huePool()
+  for (const s of tops) {
+    if (out.has(s.id)) continue
+    let h
+    for (let gap = 24; h === undefined; gap = Math.max(1, gap - 3)) {
+      h = pool.find((c) => hueDist(root, c) >= 20 && used.every((u) => hueDist(u, c) >= gap))
+      if (gap === 1) break
+    }
+    h ??= pool[0]
+    out.set(s.id, h)
+    used.push(h)
+  }
+  return out
+}
+
+export const stepHue = (steps, node) => assignHues(steps).get(node.id) ?? HUES[0]
+
+// Same rules as dragging a bubble onto another: no self-links, no duplicates, no cycles. parent null = root.
+export function canLink(parent, target, steps, ix) {
+  if (!target || (parent && parent.id === target.id)) return false
+  const kidsOf = parent ? parent.sub_steps ?? [] : steps
+  if (kidsOf.some((c) => (c.ref ?? c.id) === target.id)) return false
+  return !(parent && reaches(target, parent, ix))
+}
 
 export const newId = () =>
   globalThis.crypto?.randomUUID?.() ?? 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36)

@@ -2,12 +2,12 @@ import { index, newId, reaches } from './tree.js'
 
 // The table works on a flat outline: a row's parent is the closest row above it with a smaller depth.
 
-export const isBlank = (r) => !r.ref && !r.title.trim() && !r.description.trim()
+export const isBlank = (r) => !r.ref && !r.title.trim() && !r.subtitle.trim() && !r.description.trim()
 
-export const linkRow = (target, depth) => ({ id: newId(), depth, ref: target, title: '', description: '', done: false, extra: {} })
+export const linkRow = (target, depth) => ({ id: newId(), depth, ref: target, title: '', subtitle: '', description: '', done: false, extra: {} })
 
 export function blankRow(depth = 1) {
-  return { id: newId(), depth, title: '', description: '', done: false, extra: {} }
+  return { id: newId(), depth, title: '', subtitle: '', description: '', done: false, extra: {} }
 }
 
 export function flatten(steps) {
@@ -19,11 +19,12 @@ export function flatten(steps) {
         rows[rows.length - 1].id = s.id ?? newId()
         continue
       }
-      const { id, title, description, status, sub_steps, ...extra } = s
+      const { id, title, subtitle, description, status, sub_steps, ...extra } = s
       rows.push({
         id: id ?? newId(),
         depth,
         title: title ?? '',
+        subtitle: subtitle ?? '',
         description: description ?? '',
         done: status === 'completed',
         extra
@@ -61,6 +62,7 @@ export function build(rows) {
     const node = {
       id: r.id,
       title: r.title.trim(),
+      ...(r.subtitle.trim() ? { subtitle: r.subtitle.trim() } : {}),
       description: r.description.trim(),
       status: r.done ? 'completed' : 'pending',
       ...r.extra,

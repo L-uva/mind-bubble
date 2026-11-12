@@ -2,7 +2,7 @@
 import { ref, shallowRef, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ZoomIn, ZoomOut, Maximize } from 'lucide-vue-next'
 import { World, ROOT_ID, fitText } from '../physics.js'
-import { HUES, index, isVisible, percent, valueText } from '../tree.js'
+import { assignHues, canLink, colorScheme, index, isVisible, percent, rootHue, valueText } from '../tree.js'
 
 const props = defineProps({
   title: { type: String, default: '' },
@@ -118,19 +118,20 @@ function focusSet(id) {
 
 function items() {
   const ix = index(props.steps)
-  const out = [{ id: ROOT_ID, parentId: null, level: 0, hue: 255, label: props.title, desc: '', extra: `${percent(props.steps)} %` }]
+  const hues = assignHues(props.steps)
+  const out = [{ id: ROOT_ID, parentId: null, level: 0, hue: rootHue(), label: props.title, desc: '', extra: `${percent(props.steps)} %` }]
   const byId = new Map([[ROOT_ID, out[0]]])
   const links = []
   const walk = (list, parentId, level, hue) => {
-    list.forEach((s, i) => {
+    list.forEach((s) => {
       if (s.ref) {
         const t = ix.get(s.ref)
         if (t && isVisible(t, ix)) links.push([parentId, t.id])
         return
       }
       if (!isVisible(s, ix)) return
-      const h = level === 1 ? (s.color ?? HUES[i % HUES.length]) : hue
-      const it = { id: s.id, parentId, level, hue: h, label: s.title, desc: s.description, extra: valueText(s), done: s.status === 'completed', links: [] }
+      const h = level === 1 ? hues.get(s.id) : hue
+      const it = { id: s.id, parentId, level, hue: h, label: s.title, sub: s.subtitle, desc: s.description, extra: valueText(s), done: s.status === 'completed', links: [] }
       byId.set(s.id, it)
       out.push(it)
       walk(s.sub_steps ?? [], s.id, level + 1, h)
@@ -155,10 +156,10 @@ function rebuild() {
   )
   for (const it of list) {
     const n = world.map.get(it.id)
-    const t = fitText(it.label, n.r0, it.extra)
+    const t = fitText(it.label, n.r0, it.extra, it.sub)
     n.lines = t.lines
+    n.kinds = t.kinds
     n.fs = t.fs
-    n.hasExtra = t.hasExtra
     n.fullTitle = it.label
     n.desc = it.desc
     n.done = !!it.done
@@ -205,6 +206,8 @@ function pointer(e) {
 }
 
 const linkLine = ref(null)
+const mode = ref('')
+const linkOver = ref(null)
 let pan = null
 let pinch = null
 let press = 0
@@ -276,6 +279,7 @@ function onDown(e, n) {
 
 function onMove(e) {
   if (pan) {
+    if (Math.hypot(e.clientX - pan.x, e.clientY - pan.y) > 3) mode.value = 'pan'
     view.value = { ...view.value, x: pan.vx + e.clientX - pan.x, y: pan.vy + e.clientY - pan.y }
     auto = false
     return
@@ -287,12 +291,32 @@ function onMove(e) {
     clearTimeout(press)
     if (!down.n.isRoot && !down.linking) world.startDrag(down.n.id, p.x - down.ox, p.y - down.oy)
   }
-  if (down.linking) linkLine.value = down.moved ? { x1: down.n.x, y1: down.n.y, x2: p.x, y2: p.y } : null
-  else if (down.moved) world.moveDrag(p.x - down.ox, p.y - down.oy)
+  if (down.linking) {
+    linkLine.value = down.moved ? { x1: down.n.x, y1: down.n.y, x2: p.x, y2: p.y } : null
+    if (down.moved) {
+      mode.value = 'link'
+      updateLinkOver(e)
+    }
+  } else if (down.moved) {
+    if (!down.n.isRoot) mode.value = 'drag'
+    world.moveDrag(p.x - down.ox, p.y - down.oy)
+  }
+}
+
+function updateLinkOver(e) {
+  const id = document.elementFromPoint(e.clientX, e.clientY)?.closest('.bubble')?.dataset.id
+  if (!id || id === down.n.id) {
+    linkOver.value = null
+    return
+  }
+  const ix = index(props.steps)
+  linkOver.value = { id, ok: canLink(id === ROOT_ID ? null : ix.get(id), ix.get(down.n.id), props.steps, ix) }
 }
 
 function onUp(e) {
   clearTimeout(press)
+  mode.value = ''
+  linkOver.value = null
   if (pan) {
     pan = null
     return
@@ -374,6 +398,7 @@ function playPop(id) {
 defineExpose({ playPop })
 
 watch(() => [props.title, props.steps], rebuild, { deep: true })
+watch(colorScheme, rebuild, { deep: true })
 
 let ro
 let saveTimer = 0
@@ -408,7 +433,7 @@ onBeforeUnmount(() => {
   <svg
     ref="svg"
     class="canvas"
-    :class="{ adding }"
+    :class="{ adding, panning: mode === 'pan', dragging: mode === 'drag', linking: mode === 'link' }"
     @pointerdown.capture="trackDown"
     @pointerdown.self="onBgDown"
     @wheel.prevent="onWheel"
@@ -428,7 +453,7 @@ onBeforeUnmount(() => {
         :ref="(el) => (n.el = el)"
         class="bubble"
         :data-id="n.id"
-        :class="{ root: n.isRoot, done: n.done }"
+        :class="{ root: n.isRoot, done: n.done, 'link-ok': linkOver?.id === n.id && linkOver.ok, 'link-bad': linkOver?.id === n.id && !linkOver.ok }"
         :style="{ '--h': n.hue, '--lv': n.level }"
         @pointerdown="onDown($event, n)"
         @pointerenter="onEnter($event, n)"
@@ -443,7 +468,7 @@ onBeforeUnmount(() => {
             :key="i"
             x="0"
             :y="(i - (n.lines.length - 1) / 2) * n.fs * 1.18"
-            :class="{ extra: n.hasExtra && i === n.lines.length - 1, 'root-title': n.isRoot && !(n.hasExtra && i === n.lines.length - 1) }"
+            :class="{ extra: n.kinds[i] === 'extra', sub: n.kinds[i] === 'sub', 'root-title': n.isRoot && n.kinds[i] === 'title' }"
           >
             {{ l }}
           </text>

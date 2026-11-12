@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { Check, X, Lock, Pencil, Save, Trash2, Link2 } from 'lucide-vue-next'
+import { X, Pencil, Save, Trash2, Link2 } from 'lucide-vue-next'
 import Card from './Card.vue'
 import Checklist from './Checklist.vue'
 import { HUES, count, pendingBelow, valueText } from '../tree.js'
@@ -12,12 +12,11 @@ const props = defineProps({
   ix: Map,
   shared: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['close', 'done', 'reopen', 'edit', 'remove', 'color', 'unlink'])
+const emit = defineEmits(['close', 'reopen', 'edit', 'remove', 'color', 'unlink'])
 
 const remaining = computed(() => pendingBelow(props.node, props.ix))
 const subCount = computed(() => count(props.node.sub_steps).total)
 const confirming = ref(false)
-const completed = computed(() => props.node.status === 'completed')
 const value = computed(() => valueText(props.node))
 
 const editing = ref(false)
@@ -27,6 +26,7 @@ const valid = computed(() => draft.value.title?.trim())
 function startEdit() {
   draft.value = {
     title: props.node.title,
+    subtitle: props.node.subtitle ?? '',
     description: props.node.description ?? '',
     value: props.node.value ?? '',
     unit: props.node.unit ?? ''
@@ -39,6 +39,7 @@ function submit() {
   const v = String(draft.value.value).trim()
   emit('edit', {
     title: draft.value.title.trim(),
+    subtitle: draft.value.subtitle.trim() || undefined,
     description: draft.value.description.trim(),
     value: v === '' ? undefined : isNaN(Number(v)) ? v : Number(v),
     unit: draft.value.unit.trim() || undefined
@@ -50,10 +51,10 @@ function submit() {
 <template>
   <Card :title="node.title" :subtitle="path.join(' › ')" @close="emit('close')">
     <template #tools>
-      <div v-if="!editing && !confirming" class="card-tools tools-row">
+      <template v-if="!editing && !confirming">
         <button class="icon-btn" title="Redigera" @click="startEdit"><Pencil :size="16" /></button>
         <button class="icon-btn danger" title="Ta bort" @click="confirming = true"><Trash2 :size="16" /></button>
-      </div>
+      </template>
     </template>
 
     <div v-if="confirming" class="confirm">
@@ -71,7 +72,8 @@ function submit() {
       <p class="muted">Detta kan inte ångras.</p>
     </div>
     <form v-else-if="editing" id="node-edit" class="form" @submit.prevent="submit">
-      <label>Titel *<input v-model="draft.title" required autofocus /></label>
+      <label>Uppgift *<input v-model="draft.title" required autofocus /></label>
+      <label>Underrubrik<input v-model="draft.subtitle" /></label>
       <label>Beskrivning<textarea v-model="draft.description" rows="3" /></label>
       <div class="row">
         <label>Värde<input v-model="draft.value" /></label>
@@ -102,40 +104,32 @@ function submit() {
       </div>
     </form>
     <template v-else>
+      <p v-if="node.subtitle" class="sub-label">{{ node.subtitle }}</p>
       <p v-if="node.description" class="desc">{{ node.description }}</p>
-      <p v-else class="muted">Ingen beskrivning.</p>
       <dl v-if="value" class="meta">
         <dt>Värde</dt>
         <dd>{{ value }}</dd>
       </dl>
-      <dl class="meta">
-        <dt>Status</dt>
-        <dd>{{ completed ? 'Klart' : 'Väntar' }}</dd>
-      </dl>
-      <p v-if="remaining" class="lock"><Lock :size="15" /> Poppa de {{ remaining }} mindre bubblorna först</p>
       <ul v-if="shared.length" class="shared-list">
         <li v-for="s in shared" :key="s.refId">
           <Link2 :size="14" /> Delas även under <strong>{{ s.parentTitle }}</strong>
           <button class="icon-btn" title="Ta bort länken" @click="emit('unlink', s.refId)"><X :size="14" /></button>
         </li>
       </ul>
-      <Checklist v-if="node.sub_steps?.length" :items="node.sub_steps" @reopen="emit('reopen', $event)" />
+      <template v-if="node.sub_steps?.length">
+        <p class="group-label">Deluppgifter<template v-if="remaining"> · {{ remaining }} kvar att poppa</template></p>
+        <Checklist :items="node.sub_steps" @reopen="emit('reopen', $event)" />
+      </template>
     </template>
 
-    <template #actions>
+    <template v-if="confirming || editing" #actions>
       <template v-if="confirming">
         <button class="btn ghost" @click="confirming = false"><X :size="16" /> Avbryt</button>
         <button class="btn danger" @click="emit('remove')"><Trash2 :size="16" /> Ta bort</button>
       </template>
-      <template v-else-if="editing">
+      <template v-else>
         <button class="btn ghost" type="button" @click="editing = false"><X :size="16" /> Avbryt</button>
         <button class="btn primary" type="submit" form="node-edit" :disabled="!valid"><Save :size="16" /> Spara</button>
-      </template>
-      <template v-else>
-        <button class="btn ghost" @click="emit('close')"><X :size="16" /> Avbryt</button>
-        <button class="btn primary" :disabled="remaining > 0 || completed" @click="emit('done')">
-          <Check :size="16" /> Klart
-        </button>
       </template>
     </template>
   </Card>
